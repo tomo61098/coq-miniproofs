@@ -1,4 +1,4 @@
-Add LoadPath "C:\Progis\Coq\Prog\matrix" as Matrix.
+(* Add LoadPath "C:\Progis\Coq\Prog\matrix" as Matrix. *)
 Load Cprops.
 
 Open Scope C.
@@ -286,15 +286,123 @@ Proof.
         apply Z.
 Qed.
 
-Section Axb_solutions.
+(* ORTHO PROOFS *)
 
-  Fixpoint solution_upTri {n m: nat} (R: matrix n m)
-  (Rp: is_upTri R) (x: vec n): option (vec m).
-  destruct m.
-    - apply (Some []).
-    - 
+Definition gramschmidt_step {n} (x: vec n) (e: vec n) :=
+  if vec_eq_dec e 0%Vec then x else (x - (dot x e / dot e e) * e)%Vec.
 
-End Axv_solutions.
+Lemma ortho_gramschmidt_l: forall {n} (x: vec n) (e: vec n),
+  dot (gramschmidt_step x e) e = 0%C.
+Proof.
+  intros. unfold gramschmidt_step.
+  destruct (vec_eq_dec e 0%Vec).
+    - rewrite e0. rewrite dot_comm. rewrite dot_0. lca.
+    - rewrite <- vec_plus_sub. rewrite dot_dist_l.
+      rewrite <- vec_mult_neg1.
+      rewrite <-2 dot_mult_commute.
+      assert (dot e e <> 0%C) by eauto using dot_eq0.
+      replace (dot x e / dot e e) with (dot x e * / dot e e)%C by auto.
+      rewrite Cmult_assoc.
+      rewrite (Cinv_l _ H). lca.
+Qed.
+
+Lemma ortho_gramschmidt_r: forall {n} (x: vec n) (e: vec n),
+  dot e (gramschmidt_step x e) = 0%C.
+Proof.
+  intros. rewrite dot_comm.
+  rewrite ortho_gramschmidt_l.
+  exact Cconj_0.
+Qed.
+
+Fixpoint orthogonalize_vec {n m} (x: vec n) (A: matrix m n) :=
+  match A with
+    | [] => x
+    | v::V => gramschmidt_step (orthogonalize_vec x V) v
+  end
+.
+
+Lemma ortho_gramschmidt_matrix: forall {n m} (x: vec m) (A: matrix n m),
+  is_diag (A @@ (A ^*)) ->
+  A @ (orthogonalize_vec x A ^*)%Vec = 0%Vec.
+Proof.
+  induction n; intros.
+    - rewrite eta0. exact (eta0 _).
+    - rewrite (eta A). simpl.
+      f_equal.
+      -- rewrite dot_comm.
+         rewrite <- dot_conj_dist.
+         rewrite vec_conj_conj.
+         rewrite dot_conj_dist. rewrite ortho_gramschmidt_l. lca.
+      -- unfold gramschmidt_step.
+         destruct (vec_eq_dec (hd A) 0%Vec).
+         * apply IHn.
+           rewrite <- mat_tc_herm.
+           apply diag_step_diag in H.
+           rewrite mat_tc_mult_commute in H.
+           rewrite mat_tail_mult_commute in H.
+           exact H.
+         * rewrite <- vec_plus_sub. rewrite vec_plus_conj_dist.
+           rewrite mat_vec_dist.
+           assert (F:= diag_step _ H).
+           apply diag_step_diag in H.
+           rewrite mat_tc_mult_commute in H.
+           rewrite mat_tail_mult_commute in H.
+           rewrite mat_tc_herm in H.
+           rewrite (IHn _ _ _ H). rewrite vec_plus_comm. rewrite vec_plus_0.
+           rewrite vec_neg_conj.
+           rewrite vec_mult_conj_dist.
+           assert (HD:= f_equal (fun x => tl (hd x)) F).
+           assert (TL:= f_equal (fun x => tl (hc x)) F).
+           simpl in HD, TL.
+           rewrite hc_col in TL.
+           rewrite (tl_app (hd (col _))) in HD.
+           rewrite (eta0 _) in HD. simpl in HD.
+           rewrite mat_head_mult_commute in HD.
+           rewrite <- mat_tm_tl_commute in HD.
+           apply (f_equal (fun x: vec n => x ^*))%Vec in HD.
+           rewrite vec_conj_0 in HD.
+           rewrite mat_mult_vec_conj in HD.
+           rewrite mat_tl_conj in HD.
+           rewrite mat_herm_herm in HD.
+           rewrite vec_neg_mult.
+           rewrite mat_scalar_comm.
+           rewrite mat_vec_scalar_dist.
+           rewrite HD.
+           exact (vec_0_mult _).
+Qed.
+
+Fixpoint add_ortho_elem {n m k} (Q: matrix m n) (E: matrix k n) :=
+  match E with
+    | x::Es =>
+      if (vec_eq_dec (orthogonalize_vec x Q) 0%Vec)
+      then add_ortho_elem Q Es
+      else orthogonalize_vec x Q
+    | [] => 0%Vec
+  end
+.
+
+Lemma add_ortho_ortho:
+  forall {n m k} (Q: matrix m n) (E: matrix k n),
+    is_diag (Q @@ Q^*) ->
+    is_diag (((add_ortho_elem Q E)::Q) @@ (((add_ortho_elem Q E)::Q)^*))
+.
+Proof.
+  induction k; intros.
+    - rewrite (eta0 E). simpl.
+      rewrite dot_0.
+      replace (0%Vec :: Q) with ([0%Vec] ++ Q) by auto.
+      rewrite (herm_app_dist [_]).
+      simpl. rewrite row_tm_col.
+      rewrite <- col_conj.
+      rewrite vec_conj_0.
+      rewrite hc_col, tc_col.
+      rewrite mat_mult_zeros.
+      rewrite mat_mult_mat_row_step.
+      simpl. rewrite mat_mult_zeros.
+      apply S_diag. exact H.
+    - rewrite (eta E). simpl.
+      destruct (vec_eq_dec (orthogonalize_vec (hd E) Q) 0%Vec).
+        +  
 
 Lemma FF: forall {n m} (A: matrix n m) (x: vec m),
   {y | tM A @ y = x} + {forall y, tM A @ y <> x}.

@@ -306,7 +306,7 @@ Proof.
   + simpl.
     rewrite IHm.
     remember (fun y => f (m + y)%nat) as g.
-    replace (f m) with (g O) by (subst; rewrite plus_0_r; reflexivity).
+    replace (f m) with (g O) by (subst; rewrite Nat.add_0_r; reflexivity).
     replace (f (m + n)%nat) with (g n) by (subst; reflexivity).
     replace (Csum (fun x : nat => f (S (m + x))) n) with
             (Csum (fun x : nat => g (S x)) n).
@@ -346,13 +346,13 @@ Proof.
       intros x Hx.
       rewrite Nat.div_add_l by assumption.
       rewrite Nat.div_small; trivial.
-      rewrite plus_0_r.
+      rewrite Nat.add_0_r.
       rewrite Nat.add_mod by assumption.
       rewrite Nat.mod_mul by assumption.
-      rewrite plus_0_l.
+      rewrite Nat.add_0_l.
       repeat rewrite Nat.mod_small; trivial. }
     rewrite <- Csum_sum.
-    rewrite plus_comm.
+    rewrite Nat.add_comm.
     reflexivity.
 Qed.
 
@@ -364,6 +364,35 @@ Proof. intros.
     1: apply (f_equal snd) in A.
     2,3: apply (f_equal fst) in A.
     all: auto.
+Qed.
+
+Lemma Cnorm_0: Cnorm 0 = 0%R.
+Proof. simpl. rewrite Rmult_0_l. rewrite Rplus_0_l. exact sqrt_0. Qed.
+
+Lemma Cnorm2_neg: forall x: C, Cnorm2 (-x) = Cnorm2 x.
+Proof. intros.
+  cut (RtoC (Cnorm2 (-x)) = RtoC (Cnorm2 x)).
+  { intros. inversion H; subst. exact H1. }
+  rewrite <- Conj_mult_norm2.
+  rewrite Cconj_opp.
+  rewrite <- Copp_mult_distr_r.
+  rewrite <- Copp_mult_distr_l.
+  rewrite Conj_mult_norm2.
+  exact (Copp_involutive _).
+Qed.
+
+Lemma Cnorm_neg: forall x: C, Cnorm (-x) = Cnorm x.
+Proof.
+  intros. unfold Cnorm.
+  f_equal. apply (Cnorm2_neg x).
+Qed.
+
+Lemma Cnorm_Rabs: forall x: R, Cnorm x = Rabs x.
+Proof. intros. cbn.
+  rewrite Rmult_0_l.
+  rewrite Rplus_0_r.
+  rewrite Rmult_1_r.
+  apply sqrt_Rsqr_abs.
 Qed.
 
 Close Scope R.

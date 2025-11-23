@@ -1,11 +1,11 @@
-Add LoadPath "C:\Progis\Coq\Prog\matrix" as Matrix.
+(* Add LoadPath "C:\Progis\Coq\Prog\matrix" as Matrix. *)
 Load Complex.
 
 Section StrongInduction.
 
   Variable P:nat -> Prop.
 
-  (** The stronger inductive hypothesis given in strong induction. The standard
+  (** The stronger in   ductive hypothesis given in strong induction. The standard
   [nat ] induction principle provides only n = pred m, with [P 0] required
   separately. *)
   Hypothesis IH : forall m, (forall n, n < m -> P n) -> P m.
@@ -79,6 +79,10 @@ Proof. intros. rewrite (eta A). simpl. trivial. Qed.
 
 Global Hint Resolve hd_app : vec_scope.
 Global Hint Resolve tl_app : vec_scope.
+
+Lemma t_type_assoc: forall {T n m k},
+  t T (n + (m + k)) = t T (n + m + k).
+Proof. intros. f_equal. apply (Nat.add_assoc). Qed.
 
 Require Import Lia.
 
@@ -178,6 +182,10 @@ Definition subvecs {n} := @zipvecs n (fun x y => (x - y)%C).
 
 Infix "+" := (plusvecs) : vec_scope.
 Infix "-" := (subvecs) : vec_scope.
+
+Definition hadamarvec {n} := @zipvecs n (fun x y => (x * y)%C).
+
+Infix ".*" := hadamarvec (at level 41, left associativity) : vec_scope.
 
 
 (* VEC PROP proof *)
@@ -369,6 +377,29 @@ Proof.
       rewrite (eta u).
       cbn.
       f_equal. apply IHn.
+Qed.
+
+Lemma vec_neg_conj: forall {n} (u: vec n),
+  (- u)^* = - (u ^*).
+Proof.
+  induction n.
+    - intros. rewrite (eta0 u). trivial.
+    - intros.
+      rewrite (eta u).
+      cbn.
+      f_equal. apply IHn.
+Qed.
+
+Lemma vec_neg_mult: forall {n} (a: C) (u: vec n),
+  - (a * u) = (-a)%C * u.
+Proof.
+  induction n.
+    - intros. rewrite eta0. exact (eta0 _).
+    - intros. rewrite (eta u).
+      cbn.
+      f_equal.
+      -- lca.
+      -- apply IHn.
 Qed.
 
 Hint Resolve vec_mult_dist : vec_scope.
@@ -609,6 +640,10 @@ Definition submat {n m} := @zipmat n m (fun x y => (x - y)%Vec).
 
 Infix "+" := (plusmat) : mat_scope.
 Infix "-" := (submat) : mat_scope.
+
+Definition hadamarmat {n m} := @zipmat n m (fun x y => (x .* y)%Vec).
+Infix ".*" := hadamarmat : mat_scope.
+
 
 (* MAT PROPS proofs *)
 
@@ -1386,6 +1421,11 @@ Proof.
       + rewrite (eta x). simpl.
         apply IHn.
 Qed.
+
+Lemma mat_tc_mult_commute: forall {n m r}
+  (B: matrix n r) (A: matrix r (S m)),
+    tc (B @@ A) = B @@ tc A.
+Proof. intros. simpl. apply tc_col. Qed.
 
 Global Hint Resolve tc_col : mat_scope.
 
@@ -3884,6 +3924,238 @@ Proof.
          rewrite mat_mult_I. auto.
 Qed.
 
+Lemma lowTri_step_lowTri: forall {n m} (L: matrix (S n) (S m)),
+  is_lowTri L -> is_lowTri (tc (tl L)).
+Proof. unfold is_lowTri.
+  intros. rewrite <- mat_tm_tl_commute.
+  rewrite <- mat_tm_tc_commute.
+  apply upTri_step_upTri.
+  exact H.
+Qed.
+
+
+Lemma lowTri_step: forall {n m} (L: matrix (S n) (S m)),
+  is_lowTri L -> L = (col (hc L) ++' (0%Vec::(tc (tl L)))).
+Proof. unfold is_lowTri.
+  intros.
+  rewrite <- (mat_herm_herm L) at 1.
+  rewrite <- (mat_herm_herm (_ ++' _)).
+  f_equal. f_equal. f_equal.
+  remember (tM L) as R. simpl tM.
+  rewrite vec_tl_col_commute.
+  rewrite tc_col, hc_col.
+  rewrite mat_hd_col_hc.
+  simpl.
+  replace (0%Vec :: tc (tl L)) with ([0%Vec] ++ tc (tl L)) by trivial.
+  rewrite (mat_tm_app_dist [0%Vec] _).
+  rewrite row_tm_col.
+  rewrite <- mat_tm_tl_commute.
+  rewrite <- mat_tm_tc_commute.
+  rewrite <- HeqR.
+  rewrite <- eta.
+  rewrite <- mat_hc_tm.
+  rewrite <- HeqR.
+  apply upTri_step.
+  exact H.
+Qed.
+
+Fixpoint Lxb_sig_ex {n m} (L: matrix n m) (triL: is_lowTri L)
+  (b: vec n) (H: exists x, L@x = b): { x | L @ x = b }.
+Proof.
+  destruct m.
+    + destruct (vec_eq_dec b 0%Vec).
+      -- exists 0%Vec. rewrite e. apply mat_mult_vec_empty.
+      -- apply None.
+    + destruct n.
+      -- apply Some.
+         exists 0%Vec.
+         rewrite mat_mult_zeros.
+         trivial. rewrite eta0.
+         trivial.
+      -- destruct (Ceq_dec (hd b) 0%C).
+           ++ destruct (Lxb_sig n m (tc (tl L)) (lowTri_step_lowTri _ triL) (tl b)) as [[s H]|] .
+               --- apply Some. exists (0%C::s).
+                   rewrite (eta b).
+                   rewrite mat_mult_col.
+                   simpl. rewrite vec_mult_0. rewrite vec_plus_comm. rewrite vec_plus_0.
+                   rewrite (eta (tc L)). simpl.
+                   rewrite mat_tl_tc_commute.
+                   rewrite H. f_equal.
+                   apply (lowTri_step) in triL.
+                   apply (f_equal tc) in triL.
+                   rewrite tc_col in triL.
+                   apply (f_equal hd) in triL.
+                   simpl in triL.
+                   rewrite triL.
+                   rewrite dot_0. rewrite e. exact (eq_refl 0%C).
+               --- apply None.
+           ++ destruct (Ceq_dec (hd (hc L)) 0%C).
+              ** apply None.
+              ** destruct (Lxb_sig n m (tc (tl L)) (lowTri_step_lowTri _ triL) (tl b - (hd b / (hd (hc L))) * tl (hc L)))%Vec as [[s H]|].
+                 --- apply Some. exists ((hd b / hd (hc L))::s).
+                     rewrite (eta b).
+                     rewrite mat_mult_col.
+                     simpl.
+                     rewrite (eta (tc L)). simpl.
+                     rewrite mat_tl_tc_commute.
+                     rewrite H.
+                     apply (lowTri_step) in triL.
+                     apply (f_equal tc) in triL.
+                     rewrite tc_col in triL.
+                     apply (f_equal hd) in triL.
+                     simpl in triL.
+                     rewrite triL.
+                     rewrite dot_0.
+                     rewrite (eta (_ + _)%Vec).
+                     rewrite vec_hd_plus_dist, vec_tl_plus_dist.
+                     simpl. rewrite Cplus_0_r.
+                     f_equal.
+                     * rewrite vec_hd_scalar.
+                       replace (hd b / hd (hc L)) with (hd b * / hd (hc L))%C by lca.
+                       rewrite Cmult_assoc.
+                       rewrite (Cinv_l _ n1). lca.
+                     * rewrite vec_tl_scalar.
+                       rewrite vec_plus_comm.
+                       rewrite <- vec_plus_sub.
+                       rewrite vec_plus_assoc.
+                       rewrite (vec_plus_comm (- _)%Vec).
+                       rewrite vec_plus_sub.
+                       rewrite vec_sub_sub.
+                       apply vec_plus_0.
+                 --- apply None.
+Defined.
+
+
+Fixpoint Lxb_sig {n m} (L: matrix n m) (triL: is_lowTri L)
+  (b: vec n): option { x | L @ x = b }.
+Proof.
+  destruct m.
+    + destruct (vec_eq_dec b 0%Vec).
+      -- apply Some.
+         exists 0%Vec. rewrite e. apply mat_mult_vec_empty.
+      -- apply None.
+    + destruct n.
+      -- apply Some.
+         exists 0%Vec.
+         rewrite mat_mult_zeros.
+         trivial. rewrite eta0.
+         trivial.
+      -- destruct (Ceq_dec (hd b) 0%C).
+           ++ destruct (Lxb_sig n m (tc (tl L)) (lowTri_step_lowTri _ triL) (tl b)) as [[s H]|] .
+               --- apply Some. exists (0%C::s).
+                   rewrite (eta b).
+                   rewrite mat_mult_col.
+                   simpl. rewrite vec_mult_0. rewrite vec_plus_comm. rewrite vec_plus_0.
+                   rewrite (eta (tc L)). simpl.
+                   rewrite mat_tl_tc_commute.
+                   rewrite H. f_equal.
+                   apply (lowTri_step) in triL.
+                   apply (f_equal tc) in triL.
+                   rewrite tc_col in triL.
+                   apply (f_equal hd) in triL.
+                   simpl in triL.
+                   rewrite triL.
+                   rewrite dot_0. rewrite e. exact (eq_refl 0%C).
+               --- apply None.
+           ++ destruct (Ceq_dec (hd (hc L)) 0%C).
+              ** apply None.
+              ** destruct (Lxb_sig n m (tc (tl L)) (lowTri_step_lowTri _ triL) (tl b - (hd b / (hd (hc L))) * tl (hc L)))%Vec as [[s H]|].
+                 --- apply Some. exists ((hd b / hd (hc L))::s).
+                     rewrite (eta b).
+                     rewrite mat_mult_col.
+                     simpl.
+                     rewrite (eta (tc L)). simpl.
+                     rewrite mat_tl_tc_commute.
+                     rewrite H.
+                     apply (lowTri_step) in triL.
+                     apply (f_equal tc) in triL.
+                     rewrite tc_col in triL.
+                     apply (f_equal hd) in triL.
+                     simpl in triL.
+                     rewrite triL.
+                     rewrite dot_0.
+                     rewrite (eta (_ + _)%Vec).
+                     rewrite vec_hd_plus_dist, vec_tl_plus_dist.
+                     simpl. rewrite Cplus_0_r.
+                     f_equal.
+                     * rewrite vec_hd_scalar.
+                       replace (hd b / hd (hc L)) with (hd b * / hd (hc L))%C by lca.
+                       rewrite Cmult_assoc.
+                       rewrite (Cinv_l _ n1). lca.
+                     * rewrite vec_tl_scalar.
+                       rewrite vec_plus_comm.
+                       rewrite <- vec_plus_sub.
+                       rewrite vec_plus_assoc.
+                       rewrite (vec_plus_comm (- _)%Vec).
+                       rewrite vec_plus_sub.
+                       rewrite vec_sub_sub.
+                       apply vec_plus_0.
+                 --- apply None.
+Defined.
+
+
+Fixpoint Lxb {n m} (L: matrix n m) (triL: is_lowTri L)
+  (b: vec n): option (vec m).
+Proof.
+  destruct (Lxb_sig L triL b) as [[s _]|].
+    -- exact (Some s).
+    -- exact None.
+Defined.
+
+Definition Axb_sig {n m} (A: matrix n m) (b: vec n): option { x | A @ x = b }.
+Proof.
+  assert (F:= Householder_unitary (tM A)).
+  assert (G:= Householder_upTri (tM A)).
+  rewrite <- mat_tm_tm in G.
+  destruct (Lxb_sig _ G b) as [[s D]|].
+  -- apply Some.
+     rewrite mat_mult_tm_dist in D.
+     rewrite mat_tm_tm in D.
+     exists (tM (Householder (tM A)) @ s).
+     rewrite <- mat_mult_mat_vec_assoc.
+     exact D.
+  -- apply None.
+Defined.
+
+Definition Axb {n m} (A: matrix n m) (b: vec n): option (vec m).
+Proof.
+  destruct (Axb_sig A b) as [[s D]|].
+  -- exact (Some s).
+  -- exact None.
+Defined.
+
+Fixpoint AXB_sig {n m k} (A: matrix n m) (B: matrix n k): option {X | A@@X = B}.
+Proof.
+  destruct k.
+    - apply Some.
+      exists emptyM.
+      rewrite eta0_col.
+      exact (eta0_col (_ @@ _)).
+    - destruct (AXB_sig _ _ _ A (tc B)) as [[s X]|].
+      + destruct (Axb_sig A (hc B)) as [[ss x]|].
+        * apply Some.
+          exists (col ss ++' s).
+          simpl. rewrite hc_col, tc_col.
+          rewrite X, x.
+          rewrite eta_col. exact (eq_refl _).
+        * apply None.
+      + apply None.
+Defined.
+
+Definition AXB {n m k} (A: matrix n m) (B: matrix n k): option (matrix m k).
+Proof.
+  destruct (AXB_sig A B) as [[s F]|].
+  - exact (Some s).
+  - exact None.
+Defined.
+
+(*
+Goal forall (n: nat) (b: vec n),
+  @Axb n n I b = Some b.
+Proof.
+  ...
+Qed.
+*)
 Close Scope mat_scope.
 Close Scope vec_scope.
 Close Scope C_scope.

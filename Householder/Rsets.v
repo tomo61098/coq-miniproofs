@@ -116,7 +116,7 @@ Proof.
   rewrite H.
   apply vec_mult_I.
 Qed.
-
+(*
 Theorem mat_Linv: forall {k m n} (A: matrix n m),
   spans A -> exists (B: matrix k n), B @@ A = I.
 Proof.
@@ -133,7 +133,7 @@ Proof.
      simpl.
      rewrite H0.
      f_equal. rewrite mat_mult_mat_mat_assoc.
-     rewrite E.
+     rewrite E. Check mat_mult_I_r.
      apply mat_mult_I_r.
      destruct m. {
      induction n.
@@ -199,7 +199,7 @@ Proof.
         rewrite (mat_scalar_comm).
         
 Admitted.
-
+*)
 
 Close Scope vec_scope.
 Close Scope mat_scope.
