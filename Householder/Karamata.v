@@ -1,5 +1,5 @@
 Require Import Reals.
-Require Import Lra.
+Require Import Lra Lia.
 Require Import Ring.
 Require Import Vector.
 Require Import Coq.Logic.Eqdep_dec.
@@ -162,13 +162,68 @@ destruct n.
   - apply (vsum u >= vsum v /\ inv_weak_majorized_raw n (tl u) (tl v)).
 Defined.
 
-Lemma vsum_pref_sum: forall n (u: Vector.t R n),
-  prefix_sum n u = vsum u
+Lemma vsum_pref_sum: forall n k (u: Vector.t R n),
+  prefix_sum (k + n) u = vsum u
 .
 Proof.
-  induction n; intros u.
-    - rewrite (nil_spec u). trivial.
-    - rewrite (eta u). simpl. f_equal. apply IHn.
+  induction n; intros k u.
+    - rewrite (nil_spec u). destruct k; trivial.
+    - rewrite (eta u). rewrite Nat.add_succ_r. simpl. f_equal. apply IHn.
+Qed.
+
+Lemma prefix_sum_shiftin_leq: forall n k (x: R) (u: Vector.t R n),
+  (k <= n)%nat -> prefix_sum k (shiftin x u) = prefix_sum k u
+.
+Proof.
+  induction n, k.
+  - trivial.
+  - intros. lia.
+  - trivial.
+  - intros.
+    rewrite (eta u). simpl.
+    rewrite IHn by lia.
+    lra.
+Qed.
+
+Lemma vsum_shift : forall n x (u: Vector.t R n),
+  vsum (shiftin x u) = vsum u + x
+.
+Proof.
+  induction n; intros x u.
+  - rewrite (nil_spec u). simpl. lra.
+  - rewrite (eta u).
+    simpl. rewrite IHn. lra.
+Qed.
+
+Lemma weak_majorized_raw_shiftin : forall n (x y: R) (u v: Vector.t R n),
+  weak_majorized_raw (shiftin x u) (shiftin y v)
+  -> weak_majorized_raw u v
+.
+Proof.
+  intros n x y u v Hf k.
+  destruct (le_dec k n).
+  - specialize (Hf k).
+    rewrite 2 (prefix_sum_shiftin_leq _ _ _ _ l) in Hf.
+    apply Hf.
+  - assert (N: forall a b, (a < b -> exists c, b = c + S a)%nat).
+    { induction a, b; intros L.
+      + exists O. lia.
+      + exists (b). lia.
+      + lia.
+      + assert (E: (a < b)%nat) by lia.
+        destruct (IHa _ E). exists x0. lia.
+    }
+    assert (E: (n < k)%nat) by lia.
+    destruct (N _ _ E).
+    assert (F2:= Hf n).
+    rewrite 2 prefix_sum_shiftin_leq in F2 by lia.
+    subst k.
+    rewrite <- (Nat.add_succ_comm).
+    rewrite 2 (vsum_pref_sum n (S x0)).
+    assert (M:= vsum_pref_sum n O).
+    simpl in M.
+    rewrite 2 M in F2.
+    lra.
 Qed.
 
 Lemma weak_majorized_raw_rev : forall n (u v: Vector.t R (S n)),
@@ -178,20 +233,46 @@ Lemma weak_majorized_raw_rev : forall n (u v: Vector.t R (S n)),
 Proof.
   intros n u v H k.
   rewrite (eta u), (eta v) in H.
-  unfold rev in H.
+  rewrite 2 rev_cons in H.
+  simpl in H.
+  apply weak_majorized_raw_shiftin in H.
+  apply H.
+Qed.
+
+Lemma vsum_rev: forall n (u: Vector.t R n),
+  vsum (rev u) = vsum u
+.
+Proof.
+  induction n; intros u.
+  - rewrite (nil_spec (rev u)), (nil_spec u). trivial.
+  - rewrite (eta u).
+    rewrite rev_cons.
+    simpl. rewrite vsum_shift. rewrite IHn. lra.
+Qed.
 
 Lemma majorized_raw_if_inv_majorized_raw :
   forall n (u v: Vector.t R n),
-  weak_majorized_raw u v -> inv_weak_majorized_raw (rev u) (rev v)
+  weak_majorized_raw (rev u) (rev v) -> inv_weak_majorized_raw u v
 .
 Proof.
   induction n; intros u v Hw.
   - exact I.
   - simpl. split.
     + specialize (Hw (S n)).
-      rewrite 2 vsum_pref_sum in Hw.
+      assert (Hww:= vsum_pref_sum (S n) O).
+      simpl plus in Hww.
+      rewrite 2 (Hww) in Hw.
+      rewrite 2 vsum_rev in Hw. apply Hw.
+    + apply IHn.
+      apply weak_majorized_raw_rev.
       apply Hw.
-    + apply IHn. 
+Qed.
+
+Lemma inv_majorized_raw_if_majorized_raw :
+  forall n (u v: Vector.t R n),
+  inv_weak_majorized_raw u v -> weak_majorized_raw (rev u) (rev v).
+Proof.
+
 
 Lemma vsum_singleout : forall n x (u : Vector.t R n),
   vsum (x :: u) - vsum u = x.
@@ -310,3 +391,279 @@ Proof.
     rewrite Ksum_delta_to_KPsumS.
     rewrite KPSsumS_to_KPSsum_deltaS.
     
+
+Definition secant (f : R -> R) (x y : R) : R :=
+  (f y - f x) / (y - x).
+
+Lemma frac_between_0_1 :
+  forall x y z : R,
+    x < y < z ->
+    0 <= (z - y) / (z - x) <= 1.
+Proof.
+  intros x y z H.
+  destruct H as [Hxy Hyz].
+  assert (Hzx : 0 < z - x) by lra.
+  split.
+  - left. apply Rdiv_lt_0_compat; lra.
+  - apply (Rmult_le_reg_l (z - x)); try lra.
+    rewrite Rmult_1_r.
+    rewrite Rmult_comm.
+    rewrite <- Rmult_div_swap.
+    rewrite Rmult_div_l; lra.
+Qed.
+
+Lemma convex_secant_mono_l_l :
+  forall f : R -> R,
+    convex f ->
+    forall x y z,
+      x < y < z ->
+      secant f x y <= secant f x z.
+Proof.
+  intros f Hconv x y z Hxyz.
+  destruct Hxyz as [Hxy Hyz].
+
+  set (t := (z - y) / (z - x)).
+
+  assert (Ht : 0 <= t <= 1).
+  { apply frac_between_0_1; lra. }
+
+  assert (Hy :
+    y = t * x + (1 - t) * z).
+  {
+    unfold t.
+    field.
+    lra.
+  }
+
+  assert (Hc : f y <= t * f x + (1 - t) * f z).
+  {
+    rewrite Hy.
+    apply Hconv.
+    exact Ht.
+  }
+
+  assert (Ht' : 1 - t = (y - x) / (z - x)).
+  {
+    unfold t.
+    field.
+    lra.
+  }
+
+  assert (Hstep :
+    f y - f x <= ((y - x) / (z - x)) * (f z - f x)).
+  {
+    replace (t * f x) with ((1 - (1 - t)) * f x) in Hc by lra.
+    rewrite (Rmult_minus_distr_r (f x)) in Hc.
+    rewrite Rmult_1_l in Hc.
+    rewrite Ht' in Hc.
+    unfold t in Hc.
+    lra.
+  }
+
+  unfold secant.
+  apply (Rmult_le_reg_r (y - x)).
+  { lra. }
+
+  replace (((f y - f x) / (y - x)) * (y - x)) with (f y - f x).
+  2:{
+    field.
+    lra.
+  }
+
+  replace (((f z - f x) / (z - x)) * (y - x))
+    with (((y - x) / (z - x)) * (f z - f x)).
+  2:{
+    field.
+    lra.
+  }
+
+  exact Hstep.
+Qed.
+
+Lemma sub_div_sym_explicit :
+  forall a b c d : R,
+    (a - b) / (c - d) = (b - a) / (d - c).
+Proof.
+  intros a b c d.
+  unfold Rdiv.
+  replace (b - a) with (-(a - b)) by lra.
+  replace (d - c) with (-(c - d)) by lra.
+  rewrite Rinv_opp.
+  ring.
+Qed.
+
+Lemma convex_secant_mono_l_m :
+  forall f : R -> R,
+    convex f ->
+    forall x y z,
+      y < x < z ->
+      secant f x y <= secant f x z.
+Proof.
+  intros f Hconv x y z [Hyx Hxz].
+  unfold secant.
+
+  assert (Hyz : y < z) by lra.
+
+  assert
+    (Haux :
+      (z - y) * f x <= (z - x) * f y + (x - y) * f z).
+  {
+    specialize (Hconv y z ((z - x) / (z - y))).
+    assert (Ht : 0 <= (z - x) / (z - y) <= 1).
+    { apply frac_between_0_1; lra. }
+    specialize (Hconv Ht).
+
+    replace
+      (((z - x) / (z - y)) * y +
+       (1 - (z - x) / (z - y)) * z)
+    with x in Hconv.
+    2:{ field; lra. }
+
+    replace
+      ((z - x) / (z - y) * f y +
+       (1 - (z - x) / (z - y)) * f z)
+    with
+      (((z - x) * f y + (x - y) * f z) / (z - y)) in Hconv.
+    2:{ field; lra. }
+
+    apply (Rmult_le_compat_l (z - y)) in Hconv; [|lra].
+    field_simplify in Hconv; lra.
+  }
+
+  apply (Rmult_le_reg_l ((x - y) * (z - x))).
+  { nra. }
+  rewrite (sub_div_sym_explicit _ _ y x).
+  field_simplify; nra.
+Qed.
+
+Lemma convex_secant_mono_l_r :
+  forall f : R -> R,
+    convex f ->
+    forall x y z,
+      y < z < x ->
+      secant f x y <= secant f x z.
+Proof.
+  intros f Hconv x y z [Hyz Hzx].
+  unfold secant.
+
+  assert (Hyx : y < x) by lra.
+
+  assert
+    (Haux :
+      (x - y) * f z <= (x - z) * f y + (z - y) * f x).
+  {
+    specialize (Hconv y x ((x - z) / (x - y))).
+    assert (Ht : 0 <= (x - z) / (x - y) <= 1).
+    { apply frac_between_0_1; lra. }
+    specialize (Hconv Ht).
+
+    replace
+      (((x - z) / (x - y)) * y +
+       (1 - (x - z) / (x - y)) * x)
+    with z in Hconv.
+    2:{ field; lra. }
+
+    replace
+      ((x - z) / (x - y) * f y +
+       (1 - (x - z) / (x - y)) * f x)
+    with
+      (((x - z) * f y + (z - y) * f x) / (x - y)) in Hconv.
+    2:{ field; lra. }
+
+    apply (Rmult_le_compat_l (x - y)) in Hconv; [|lra].
+    field_simplify in Hconv; lra.
+  }
+
+  apply (Rmult_le_reg_l ((x - y) * (x - z))); [nra|].
+  rewrite 2 (sub_div_sym_explicit _ _ _ x).
+  field_simplify; nra.
+Qed.
+
+Lemma secant_sym :
+  forall (f : R -> R) x y,
+    secant f x y = secant f y x.
+Proof.
+  intros f x y.
+  unfold secant.
+  apply sub_div_sym_explicit.
+Qed.
+
+Lemma convex_secant_mono_r_l :
+  forall f : R -> R,
+    convex f ->
+    forall x y z,
+      x < y < z ->
+      secant f y x <= secant f z x.
+Proof.
+  intros f Hconv x y z Hxyz.
+  rewrite (secant_sym f y x) by lra.
+  rewrite (secant_sym f z x) by lra.
+  apply convex_secant_mono_l_l; assumption.
+Qed.
+
+Lemma convex_secant_mono_r_m :
+  forall f : R -> R,
+    convex f ->
+    forall x y z,
+      y < x < z ->
+      secant f y x <= secant f z x.
+Proof.
+  intros f Hconv x y z Hxyz.
+  rewrite (secant_sym f y x) by lra.
+  rewrite (secant_sym f z x) by lra.
+  apply convex_secant_mono_l_m; assumption.
+Qed.
+
+Lemma convex_secant_mono_r_r :
+  forall f : R -> R,
+    convex f ->
+    forall x y z,
+      y < z < x ->
+      secant f y x <= secant f z x.
+Proof.
+  intros f Hconv x y z Hxyz.
+  rewrite (secant_sym f y x) by lra.
+  rewrite (secant_sym f z x) by lra.
+  apply convex_secant_mono_l_r; assumption.
+Qed.
+
+Lemma convex_secant_mono_l :
+  forall f : R -> R,
+    convex f ->
+    forall x y z,
+      x <> y ->
+      x <> z ->
+      y < z ->
+      secant f x y <= secant f x z.
+Proof.
+  intros f Hconv x y z Hxy Hxz Hyz.
+  destruct (Rtotal_order x y) as [H1|[H1|H1]];
+  destruct (Rtotal_order x z) as [H2|[H2|H2]];
+  try lra;
+  [
+    apply convex_secant_mono_l_l |
+    apply convex_secant_mono_l_m |
+    apply convex_secant_mono_l_r
+  ]; auto; lra.
+Qed.
+
+Lemma convex_secant_mono_r :
+  forall f : R -> R,
+    convex f ->
+    forall x y z,
+      x <> y ->
+      x <> z ->
+      y < z ->
+      secant f y x <= secant f z x.
+Proof.
+  intros f Hconv x y z Hxy Hxz Hyz.
+  destruct (Rtotal_order x y) as [H1|[H1|H1]];
+  destruct (Rtotal_order x z) as [H2|[H2|H2]];
+  try lra;
+  [
+    apply convex_secant_mono_r_l |
+    apply convex_secant_mono_r_m |
+    apply convex_secant_mono_r_r
+  ]; auto; lra.
+Qed.
+
