@@ -26,17 +26,6 @@ Fixpoint sumV {n : nat} (v : Vector.t R n) : R :=
   | x :: xs => x + sumV xs
   end.
 
-Definition v0 (v : Vector.t R 2) : R :=
-  Vector.hd v.
-
-Definition v1 (v : Vector.t R 2) : R :=
-  Vector.hd (Vector.tl v).
-
-(* -------- Majorization in dimension 2 -------- *)
-(* x = [a; d], y = [b; c], with equal sums and the outer pair wider:
-     a <= b <= c <= d,  a + d = b + c
-   This is the usual 2-point majorization situation. *)
-
 (* Sum of all entries of a vector *)
 Fixpoint vsum {n : nat} (v : Vector.t R n) : R :=
   match v with
@@ -155,74 +144,6 @@ Proof.
   - apply (weak_majorized_raw_tails _ h _ _ Hmaj).
 Qed.
 
-(* ---------- A basic 2-point convexity lemma ---------- *)
-
-Lemma convex_two_point_spread :
-  forall (f : R -> R) (a b c d : R),
-    convex f ->
-    a <= b /\ b <= c <= d ->
-    a + d = b + c ->
-    f a + f d >= f b + f c.
-Proof.
-  intros f a b c d Hconv Hord Heq.
-  destruct Hord as [Hab [Hbc Hcd]].
-
-  destruct (Req_EM_T d a) as [Hdaeq | Hdaeq].
-  - assert (a = b /\ b = c /\ c = d) by lra.
-    destruct H as [-> [-> ->]].
-    lra.
-  - assert (Hda : d - a > 0) by lra.
-    set (t := (c - a) / (d - a)).
-
-    assert (Ht : 0 <= t <= 1).
-    {
-      unfold t.
-      split.
-      - apply Rmult_le_reg_r with (r := d - a).
-        + lra.
-        + field_simplify.
-          lra.
-          lra.
-      - apply Rmult_le_reg_r with (r := d - a).
-        + lra.
-        + field_simplify.
-          lra.
-          lra.
-    }
-
-    assert (Htb : 0 <= 1 - t <= 1) by lra.
-
-    assert (Hc : c = t * d + (1 - t) * a).
-    {
-      unfold t.
-      field.
-      lra.
-    }
-
-    assert (Hb : b = (1 - t) * d + t * a).
-    {
-      unfold t. rewrite Rmult_minus_distr_r.
-      rewrite Rmult_1_l.
-      rewrite <- Rplus_minus_swap.
-      rewrite <- Rplus_minus_assoc.
-      rewrite <- Rmult_minus_distr_l.
-      rewrite <- (Ropp_minus_distr'_depr a d).
-      rewrite Ropp_mult_distr_r_reverse.
-      rewrite <- Rmult_div_swap.
-      rewrite Rmult_div_l; lra.
-    }
-
-    pose proof (Hconv d a t Ht) as Hcineq.
-    pose proof (Hconv d a (1 - t) Htb) as Hbineq.
-
-    rewrite <- Hc in Hcineq.
-    replace (1 - (1 - t)) with (t) in Hbineq by lra.
-    rewrite <- Hb in Hbineq.
-
-    simpl in Hcineq, Hbineq.
-    lra.
-Qed.
-
 Inductive sorted_asc : forall n, Vector.t R n -> Prop :=
 | sorted_asc_nil :
     sorted_asc 0 []
@@ -235,12 +156,42 @@ Inductive sorted_asc : forall n, Vector.t R n -> Prop :=
       sorted_asc (S n) (y :: v) ->
       sorted_asc (S (S n)) (x :: y :: v).
 
-Fixpoint inv_majorized_raw {n : nat} (u v: Vector.t R n) : Prop.
+Fixpoint inv_weak_majorized_raw {n : nat} (u v: Vector.t R n) : Prop.
 destruct n.
   - apply True.
-  - apply (vsum u >= vsum v /\ inv_majorized_raw n (tl u) (tl v)).
+  - apply (vsum u >= vsum v /\ inv_weak_majorized_raw n (tl u) (tl v)).
 Defined.
 
+Lemma vsum_pref_sum: forall n (u: Vector.t R n),
+  prefix_sum n u = vsum u
+.
+Proof.
+  induction n; intros u.
+    - rewrite (nil_spec u). trivial.
+    - rewrite (eta u). simpl. f_equal. apply IHn.
+Qed.
+
+Lemma weak_majorized_raw_rev : forall n (u v: Vector.t R (S n)),
+  weak_majorized_raw (rev u) (rev v) ->
+  weak_majorized_raw (rev (tl u)) (rev (tl v))
+.
+Proof.
+  intros n u v H k.
+  rewrite (eta u), (eta v) in H.
+  unfold rev in H.
+
+Lemma majorized_raw_if_inv_majorized_raw :
+  forall n (u v: Vector.t R n),
+  weak_majorized_raw u v -> inv_weak_majorized_raw (rev u) (rev v)
+.
+Proof.
+  induction n; intros u v Hw.
+  - exact I.
+  - simpl. split.
+    + specialize (Hw (S n)).
+      rewrite 2 vsum_pref_sum in Hw.
+      apply Hw.
+    + apply IHn. 
 
 Lemma vsum_singleout : forall n x (u : Vector.t R n),
   vsum (x :: u) - vsum u = x.
@@ -265,14 +216,15 @@ destruct n.
 Defined.
 
 Lemma Ksum_to_Ksum_delta : forall n f (u v: Vector.t R n),
-  elem_neq u v ->
   Ksum f u v = Ksum_delta f u v.
 Proof.
   induction n.
   - trivial.
-  - intros f u v [uv Hneq].
+  - intros f u v.
     simpl. unfold secant_slope.
-    rewrite (IHn _ _ _ Hneq). field. lra.
+    destruct (Req_dec (hd u) (hd v)); rewrite IHn.
+    + rewrite H. lra.
+    + field. lra.
 Qed.
 
 Fixpoint KPsum {n : nat} (f : R -> R) (u v: Vector.t R n): R.
@@ -335,11 +287,26 @@ Proof.
     lra.
 Qed.
 
-Lemma 
-
+Theorem KPSsum_deltaS_mono : forall n f (u v: Vector.t R (S n)),
+  convex f ->
+  weak_majorized u v ->
+  0 <= KPSsum_deltaS f u v
+.
+Proof.
+  induction n; intros f u v Hconv [Hu [Hv Hmajo]].
+  - right. trivial.
+  - simpl.
+    Search (weak_majorized_raw).
 Theorem Karamata_inequality :
   forall n f (u v : Vector.t R n),
   convex f ->
-  majorized u v ->
+  weak_majorized u v ->
   0 <= Ksum f u v
 .
+Proof.
+  induction n; intros f u v Hconv [Hu [Hv Hmajo]].
+  - simpl. lra.
+  - rewrite Ksum_to_Ksum_delta.
+    rewrite Ksum_delta_to_KPsumS.
+    rewrite KPSsumS_to_KPSsum_deltaS.
+    
