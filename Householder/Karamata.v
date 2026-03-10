@@ -66,9 +66,19 @@ Inductive sorted_desc : forall n, Vector.t R n -> Prop :=
       sorted_desc (S n) (y :: v) ->
       sorted_desc (S (S n)) (x :: y :: v).
 
+(* Weak prefix-majorization: no equal-total-sum requirement *)
+Definition weak_majorized_raw {n : nat} (v w : Vector.t R n) : Prop :=
+  forall k, prefix_sum k v >= prefix_sum k w.
+
+(* Weak majorization with both vectors sorted descending *)
+Definition weak_majorized {n : nat} (v w : Vector.t R n) : Prop :=
+  sorted_desc n v /\
+  sorted_desc n w /\
+  weak_majorized_raw v w.
+
 (* Prefix-majorization + equal total sum *)
 Definition majorized_raw {n : nat} (v w : Vector.t R n) : Prop :=
-  (forall k, prefix_sum k v >= prefix_sum k w) /\
+  weak_majorized_raw v w /\
   vsum v = vsum w.
 
 (* Standard majorization usually assumes both vectors are sorted descending *)
@@ -76,7 +86,7 @@ Definition majorized {n : nat} (v w : Vector.t R n) : Prop :=
   sorted_desc n v /\
   sorted_desc n w /\
   majorized_raw v w.
-  
+
 Lemma majorized_raw_tails :
   forall (n : nat) (h : R) (v w : Vector.t R n),
     majorized_raw (h :: v) (h :: w) ->
@@ -90,6 +100,18 @@ Proof.
     lra.
   - simpl in Hsum.
     lra.
+Qed.
+
+Lemma weak_majorized_raw_tails :
+  forall (n : nat) (h : R) (v w : Vector.t R n),
+    weak_majorized_raw (h :: v) (h :: w) ->
+    weak_majorized_raw v w.
+Proof.
+  intros n h v w Hpref.
+  intros k.
+  specialize (Hpref (S k)).
+  simpl in Hpref.
+  lra.
 Qed.
 
 Ltac inv H := inversion H; subst.
@@ -119,6 +141,18 @@ Proof.
   - apply sorted_desc_tail with (h := h). exact Hs2.
   - apply majorized_raw_tails with (h := h). exact Hmaj.
   - inv Hmaj. simpl in H0. lra.
+Qed.
+
+Lemma weak_majorized_tails :
+  forall (n : nat) (h : R) (v w : Vector.t R n),
+    weak_majorized (h :: v) (h :: w) ->
+    weak_majorized v w.
+Proof.
+  intros n h v w [Hv [Hw Hmaj]].
+  repeat split.
+  - apply (sorted_desc_tail _ _ _ Hv).
+  - apply (sorted_desc_tail _ _ _ Hw).
+  - apply (weak_majorized_raw_tails _ h _ _ Hmaj).
 Qed.
 
 (* ---------- A basic 2-point convexity lemma ---------- *)
@@ -188,3 +222,124 @@ Proof.
     simpl in Hcineq, Hbineq.
     lra.
 Qed.
+
+Inductive sorted_asc : forall n, Vector.t R n -> Prop :=
+| sorted_asc_nil :
+    sorted_asc 0 []
+| sorted_asc_single :
+    forall x,
+      sorted_asc 1 [x]
+| sorted_asc_cons :
+    forall n x y (v : Vector.t R n),
+      x <= y ->
+      sorted_asc (S n) (y :: v) ->
+      sorted_asc (S (S n)) (x :: y :: v).
+
+Fixpoint inv_majorized_raw {n : nat} (u v: Vector.t R n) : Prop.
+destruct n.
+  - apply True.
+  - apply (vsum u >= vsum v /\ inv_majorized_raw n (tl u) (tl v)).
+Defined.
+
+
+Lemma vsum_singleout : forall n x (u : Vector.t R n),
+  vsum (x :: u) - vsum u = x.
+Proof. intros. simpl. lra. Qed.
+
+Fixpoint Ksum {n : nat} (f : R -> R) (u v: Vector.t R n) : R .
+destruct n.
+  - apply 0.
+  - apply (f (hd u) - f (hd v) + Ksum n f (tl u) (tl v)).
+Defined.
+
+Fixpoint Ksum_delta {n : nat} (f : R -> R) (u v: Vector.t R n) : R .
+destruct n.
+  - apply 0.
+  - apply (secant_slope f (hd u) (hd v) * (hd u - hd v) + Ksum_delta n f (tl u) (tl v)).
+Defined.
+
+Fixpoint elem_neq {n : nat} (u v: Vector.t R n) : Prop.
+destruct n.
+  - apply True.
+  - apply (hd u <> hd v /\ elem_neq n (tl u) (tl v)).
+Defined.
+
+Lemma Ksum_to_Ksum_delta : forall n f (u v: Vector.t R n),
+  elem_neq u v ->
+  Ksum f u v = Ksum_delta f u v.
+Proof.
+  induction n.
+  - trivial.
+  - intros f u v [uv Hneq].
+    simpl. unfold secant_slope.
+    rewrite (IHn _ _ _ Hneq). field. lra.
+Qed.
+
+Fixpoint KPsum {n : nat} (f : R -> R) (u v: Vector.t R n): R.
+destruct n.
+  - apply 0.
+  - apply (secant_slope f (hd u) (hd v) * (vsum u - vsum v) + KPsum n f (tl u) (tl v)).
+Defined.
+
+Fixpoint KPSsum {n : nat} (f : R -> R) (u v: Vector.t R n): R.
+destruct n.
+  - apply 0.
+  - apply (secant_slope f (hd u) (hd v) * (vsum (tl u) - vsum (tl v)) + KPSsum n f (tl u) (tl v)).
+Defined.
+
+Lemma Ksum_delta_to_KPsumS : forall n f (u v: Vector.t R n),
+  Ksum_delta f u v = KPsum f u v - KPSsum f u v
+.
+Proof.
+  induction n.
+  - simpl. intros. lra.
+  - intros f u v.
+    simpl. rewrite IHn.
+    replace (vsum u - vsum v) with (hd u - hd v + vsum (tl u) - vsum (tl v)).
+    2:{ rewrite (eta u), (eta v). simpl. lra. }
+    lra.
+Qed.
+
+
+Fixpoint KPSsum_deltaS {n : nat} (f: R -> R) (u v: Vector.t R (S n)) {struct n}: R.
+destruct n.
+  + apply 0.
+  + apply ((secant_slope f (hd (tl u)) (hd (tl v)) - secant_slope f (hd u) (hd v)) * (vsum (tl u) - vsum (tl v)) + KPSsum_deltaS (n) f (tl u) (tl v)).
+Defined.
+
+Lemma KPSsumS_to_KPSsum_deltaS : forall n f (u v: Vector.t R (S n)),
+  KPsum f u v - KPSsum f u v = (secant_slope f (hd u) (hd v)) * (vsum u - vsum v) + KPSsum_deltaS f u v.
+Proof.
+  induction n; intros f u v.
+  - rewrite (eta u), (eta v). rewrite (nil_spec (VectorDef.tl u)), (nil_spec (VectorDef.tl v)). simpl. lra.
+  - simpl. field_simplify.
+    replace (
+      secant_slope f (hd u) (hd v) * vsum u -
+      secant_slope f (hd u) (hd v) * vsum v -
+      secant_slope f (hd u) (hd v) * vsum (tl u) +
+      secant_slope f (hd u) (hd v) * vsum (tl v) +
+      secant_slope f (hd (tl u)) (hd (tl v)) * vsum (tl u) -
+      secant_slope f (hd (tl u)) (hd (tl v)) * vsum (tl v) +
+      KPSsum_deltaS f (tl u) (tl v)
+    ) with
+    (
+      secant_slope f (hd u) (hd v) * vsum u -
+      secant_slope f (hd u) (hd v) * vsum v -
+      secant_slope f (hd u) (hd v) * vsum (tl u) +
+      secant_slope f (hd u) (hd v) * vsum (tl v) +
+      (secant_slope f (hd (tl u)) (hd (tl v)) * (vsum (tl u) -
+      vsum (tl v)) +
+      KPSsum_deltaS f (tl u) (tl v))
+    ) by lra.
+    rewrite <- IHn. simpl.
+    lra.
+Qed.
+
+Lemma 
+
+Theorem Karamata_inequality :
+  forall n f (u v : Vector.t R n),
+  convex f ->
+  majorized u v ->
+  0 <= Ksum f u v
+.
