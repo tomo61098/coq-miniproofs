@@ -156,6 +156,17 @@ Inductive sorted_asc : forall n, Vector.t R n -> Prop :=
       sorted_asc (S n) (y :: v) ->
       sorted_asc (S (S n)) (x :: y :: v).
 
+Lemma sorted_asc_tail : forall n (u: Vector.t R (S n)),
+  sorted_asc (S n) u -> sorted_asc n (tl u)
+.
+Proof.
+  intros n u H.
+  inv H.
+  + app_inj_nat H3. constructor.
+  + app_inj_nat H2.
+    simpl tl. apply H4.
+Qed. 
+
 Fixpoint inv_weak_majorized_raw {n : nat} (u v: Vector.t R n) : Prop.
 destruct n.
   - apply True.
@@ -395,20 +406,42 @@ Proof.
   apply KPSsumS_to_KPSsum_deltaS.
 Qed.
 
-Lemma Ksum_head: forall n f x (u v: Vector.t R n),
-  Ksum f (x::u) (x::v)
+Lemma Ksum_to_KPSsum_deltaS_neg :
+  forall n f (u v: Vector.t R (S n)),
+  Ksum f u v - (secant_slope f (hd u) (hd v)) * (vsum u - vsum v) = KPSsum_deltaS f u v
 .
+Proof. intros. rewrite Ksum_to_KPSsum_deltaS. lra. Qed.
+
+Lemma Ksum_head: forall n f x (u v: Vector.t R n),
+  Ksum f (x::u) (x::v) = Ksum f u v
+.
+Proof. intros. simpl. lra. Qed.
 
 Lemma KPSum_deltaS_head : forall n f x (u v: Vector.t R (S n)),
-  KPSsum_deltaS f (x::u) (x::v) = KPSsum_deltaS f u v
+  KPSsum_deltaS f (x::u) (x::v) = secant_slope f (hd u) (hd v) * (vsum u - vsum v) + KPSsum_deltaS f u v
 .
 Proof.
-  intros. simpl.
+  intros n f x u v.
+  rewrite <- 1 Ksum_to_KPSsum_deltaS_neg.
+  rewrite Ksum_head.
+  simpl hd. unfold secant_slope at 1.
+  rewrite ! Rminus_diag.
+  rewrite Rdiv_0_r.
+  rewrite Rmult_0_l.
+  rewrite Rminus_0_r.
+  apply Ksum_to_KPSsum_deltaS.
+Qed.
+  
 
 Definition inv_weak_majorized {n : nat} (u v: Vector.t R n) :=
   sorted_asc n u /\
   sorted_asc n v /\
   inv_weak_majorized_raw u v
+.
+
+Definition inv_majorized {n : nat} (u v: Vector.t R n) :=
+  inv_weak_majorized u v /\
+  vsum u = vsum v
 .
 
 (* Convexity *)
@@ -685,44 +718,146 @@ Proof.
   ]; auto; lra.
 Qed.
 
-Lemma convex_secant_mono :
-  forall f : R -> R,
-    convex f ->
-    forall x1 x2 y1 y2,
-      x1 < x2 ->
-      y1 < y2 ->
-      secant_slope f x1 y1 <= secant_slope f x2 y2.
+Lemma convex_secant_mono : forall f x1 x2 y1 y2,
+  convex f ->
+  x1 <> y1 ->
+  x2 <> y2 ->
+  x1 < x2 ->
+  y1 < y2 ->
+  secant_slope f x1 y1 <= secant_slope f x2 y2
+.
 Proof.
-  intros f Hconv x1 x2 y1 y2 Hx Hy.
-  assert (F:= convex_secant_mono_l _ Hconv x1 y1 y2).
-  destruct (Req_dec x1 y1).
-  + subst.
+  intros.
+  destruct (Req_dec x1 y2).
+  - subst.
+    rewrite secant_sym.
+    apply convex_secant_mono_r; auto.
+    lra.
+  - assert (A:= convex_secant_mono_l f H x1 y1 y2 H0 H4 H3).
+    assert (B:= convex_secant_mono_r f H y2 x1 x2).
+    lra.
 Qed.
 
 (* Karamata *)
 
-Theorem KPSsum_deltaS_mono : forall n f (u v: Vector.t R (S n)),
+Fixpoint all_neq {n : nat} (u v: Vector.t R n): Prop.
+destruct n.
+  - apply True.
+  - apply ((hd u) <> (hd v) /\ all_neq n (tl u) (tl v)).
+Defined.
+
+Theorem inv_Karamata_neq : forall n f (u v: Vector.t R (S n)),
   convex f ->
+  all_neq u v ->
   inv_weak_majorized u v ->
   0 <= KPSsum_deltaS f u v
 .
 Proof.
-  induction n; intros f u v Hconv [Hu [Hv Hmajo]].
+  induction n; intros f u v Hconv [Huv Hneq] [Hu [Hv Hmajo]].
   - right. trivial.
   - simpl.
-    specialize (IHn f (tl u) (tl v) Hconv).
+    specialize (IHn f (tl u) (tl v) Hconv Hneq).
     destruct Hmajo as [L1 Hmajo].
+    destruct Hneq as [Huv1 Hneq].
     inv Hu. app_inj_nat H0.
     inv Hv. app_inj_nat H0.
     assert (IHn2 : 0 <= KPSsum_deltaS f (y::v0) (y0::v1)).
     { apply IHn. split; auto. }
     destruct Hmajo as [L Hmajo].
     simpl. simpl in Hmajo, L.
-    destruct H1, H3.
-    + assert (F: secant_slope f y x0 <= secant_slope f y y0).
-      { apply convex_secant_mono_l; auto.
-        
-    Search (secant_slope).
+    simpl hd in *.
+    simpl tl in *.
+    destruct H1, H3; subst.
+    + assert (A:= convex_secant_mono f x y x0 y0 Hconv Huv Huv1 H H0).
+      apply Rplus_le_le_0_compat; [|lra].
+      apply Rmult_le_pos; lra.
+    + assert (A:= convex_secant_mono_r f Hconv y0 x y (not_eq_sym Huv) (not_eq_sym Huv1) H).
+      apply Rplus_le_le_0_compat; [|lra].
+      apply Rmult_le_pos; lra.
+    + assert (A:= convex_secant_mono_l f Hconv y x0 y0 Huv Huv1 H0).
+      apply Rplus_le_le_0_compat; [|lra].
+      apply Rmult_le_pos; lra.
+    + rewrite Rminus_diag. rewrite Rmult_0_l. rewrite Rplus_0_l.
+      apply IHn2.
+Qed.
+
+
+Definition lt_all {n: nat} x (u: Vector.t R n):=
+  Forall (fun y => x <= y) u
+.
+
+Lemma lt_all_trans : forall x y,
+  x <= y -> forall n u,
+  @lt_all n y u -> @lt_all n x u
+.
+Proof.
+  intros.
+  assert (C: forall a, y <= a -> x <= a).
+  { intros. lra. }
+  assert (B:= Forall_impl R (fun a => y <= a) (fun a => x <= a) C n u).
+  apply B. apply H0.
+Qed.
+
+Lemma sorted_asc_lt_all_head : forall n (u: Vector.t R (S n)),
+  sorted_asc _ u -> lt_all (hd u) (tl u)
+.
+Proof.
+  induction n; intros u A.
+  - rewrite (nil_spec). constructor.
+  - rewrite (eta (tl u)).
+    inv A. app_inj_nat H0.
+    simpl in *.
+    constructor.
+    -- apply H1.
+    -- specialize (IHn (y :: v) H2).
+       simpl in IHn.
+       apply (lt_all_trans x y); auto.
+Qed.
+
+Lemma lt_all_sorted_asc : forall n x (u: Vector.t R n),
+  sorted_asc n u -> lt_all x u -> sorted_asc (S n) (x::u)
+.
+Proof.
+  induction n; intros x u A B.
+  - rewrite (nil_spec u); constructor.
+  - rewrite (eta u). constructor.
+    -- inv B. app_inj_nat H0.
+       auto.
+    -- apply IHn.
+      + apply (sorted_asc_tail _ _ A).
+      + apply sorted_asc_lt_all_head. auto.
+Qed.
+
+Lemma exist_Ksum_prime : forall n f (u v: Vector.t R n),
+  exists m u' v',
+  @all_neq m u' v' /\
+  (Forall (fun a => In a u) u') /\
+  (Forall (fun a => In a v) v') /\
+  (sorted_asc _ u -> sorted_asc _ u') /\
+  (sorted_asc _ v -> sorted_asc _ v') /\
+  (inv_weak_majorized_raw u v -> inv_weak_majorized_raw u' v') /\
+  (vsum u = vsum v -> vsum u' = vsum v') /\
+  Ksum f u v = Ksum f u' v'
+.
+Proof.
+  induction n; intros f u v.
+  - exists O, [], [].
+    repeat constructor.
+  - specialize (IHn f (tl u) (tl v)).
+    destruct IHn as [m [u' [v' [Nuv [Au [Av [Su [Sv [W [V K]]]]]]]]]].
+    destruct (Req_dec (hd u) (hd v)).
+    + exists m, u', v'.
+      repeat constructor.
+      * auto.
+      * admit.
+
+Theorem inv_Karamata : forall n f (u v: Vector.t R n),
+  convex f ->
+  inv_majorized u v ->
+  0 <= Ksum f u v
+.
+
+
 Theorem Karamata_inequality :
   forall n f (u v : Vector.t R n),
   convex f ->
@@ -736,5 +871,4 @@ Proof.
     rewrite Ksum_delta_to_KPsumS.
     rewrite KPSsumS_to_KPSsum_deltaS.
     
-
 
