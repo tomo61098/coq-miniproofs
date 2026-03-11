@@ -272,7 +272,30 @@ Lemma inv_majorized_raw_if_majorized_raw :
   forall n (u v: Vector.t R n),
   inv_weak_majorized_raw u v -> weak_majorized_raw (rev u) (rev v).
 Proof.
-
+  induction n; intros u v Hf k.
+  - rewrite 2 (nil_spec (rev _)). destruct k; right; trivial.
+  - rewrite (eta u), (eta v). rewrite 2 rev_cons.
+    destruct (le_dec k n).
+    + rewrite 2 (prefix_sum_shiftin_leq _ _ _ _ l).
+      apply IHn. apply Hf.
+    + assert (N: forall a b, (a < b -> exists c, b = c + S a)%nat).
+    { induction a, b; intros L.
+      + exists O. lia.
+      + exists (b). lia.
+      + lia.
+      + assert (E: (a < b)%nat) by lia.
+        destruct (IHa _ E). exists x. lia.
+    }
+    assert (E: (n < k)%nat) by lia.
+    destruct (N _ _ E).
+    rewrite H.
+    rewrite 2 vsum_pref_sum.
+    rewrite 2 vsum_shift.
+    destruct Hf as [L Hf].
+    rewrite 2 vsum_rev.
+    rewrite (eta u), (eta v) in L.
+    simpl in L. lra.
+Qed.
 
 Lemma vsum_singleout : forall n x (u : Vector.t R n),
   vsum (x :: u) - vsum u = x.
@@ -288,12 +311,6 @@ Fixpoint Ksum_delta {n : nat} (f : R -> R) (u v: Vector.t R n) : R .
 destruct n.
   - apply 0.
   - apply (secant_slope f (hd u) (hd v) * (hd u - hd v) + Ksum_delta n f (tl u) (tl v)).
-Defined.
-
-Fixpoint elem_neq {n : nat} (u v: Vector.t R n) : Prop.
-destruct n.
-  - apply True.
-  - apply (hd u <> hd v /\ elem_neq n (tl u) (tl v)).
 Defined.
 
 Lemma Ksum_to_Ksum_delta : forall n f (u v: Vector.t R n),
@@ -368,32 +385,33 @@ Proof.
     lra.
 Qed.
 
-Theorem KPSsum_deltaS_mono : forall n f (u v: Vector.t R (S n)),
-  convex f ->
-  weak_majorized u v ->
-  0 <= KPSsum_deltaS f u v
+Lemma Ksum_to_KPSsum_deltaS : forall n f (u v: Vector.t R (S n)),
+  Ksum f u v = (secant_slope f (hd u) (hd v)) * (vsum u - vsum v) + KPSsum_deltaS f u v
 .
 Proof.
-  induction n; intros f u v Hconv [Hu [Hv Hmajo]].
-  - right. trivial.
-  - simpl.
-    Search (weak_majorized_raw).
-Theorem Karamata_inequality :
-  forall n f (u v : Vector.t R n),
-  convex f ->
-  weak_majorized u v ->
-  0 <= Ksum f u v
-.
-Proof.
-  induction n; intros f u v Hconv [Hu [Hv Hmajo]].
-  - simpl. lra.
-  - rewrite Ksum_to_Ksum_delta.
-    rewrite Ksum_delta_to_KPsumS.
-    rewrite KPSsumS_to_KPSsum_deltaS.
-    
+  intros.
+  rewrite Ksum_to_Ksum_delta.
+  rewrite Ksum_delta_to_KPsumS.
+  apply KPSsumS_to_KPSsum_deltaS.
+Qed.
 
-Definition secant (f : R -> R) (x y : R) : R :=
-  (f y - f x) / (y - x).
+Lemma Ksum_head: forall n f x (u v: Vector.t R n),
+  Ksum f (x::u) (x::v)
+.
+
+Lemma KPSum_deltaS_head : forall n f x (u v: Vector.t R (S n)),
+  KPSsum_deltaS f (x::u) (x::v) = KPSsum_deltaS f u v
+.
+Proof.
+  intros. simpl.
+
+Definition inv_weak_majorized {n : nat} (u v: Vector.t R n) :=
+  sorted_asc n u /\
+  sorted_asc n v /\
+  inv_weak_majorized_raw u v
+.
+
+(* Convexity *)
 
 Lemma frac_between_0_1 :
   forall x y z : R,
@@ -417,7 +435,7 @@ Lemma convex_secant_mono_l_l :
     convex f ->
     forall x y z,
       x < y < z ->
-      secant f x y <= secant f x z.
+      secant_slope f x y <= secant_slope f x z.
 Proof.
   intros f Hconv x y z Hxyz.
   destruct Hxyz as [Hxy Hyz].
@@ -460,7 +478,7 @@ Proof.
     lra.
   }
 
-  unfold secant.
+  unfold secant_slope.
   apply (Rmult_le_reg_r (y - x)).
   { lra. }
 
@@ -497,10 +515,10 @@ Lemma convex_secant_mono_l_m :
     convex f ->
     forall x y z,
       y < x < z ->
-      secant f x y <= secant f x z.
+      secant_slope f x y <= secant_slope f x z.
 Proof.
   intros f Hconv x y z [Hyx Hxz].
-  unfold secant.
+  unfold secant_slope.
 
   assert (Hyz : y < z) by lra.
 
@@ -541,10 +559,10 @@ Lemma convex_secant_mono_l_r :
     convex f ->
     forall x y z,
       y < z < x ->
-      secant f x y <= secant f x z.
+      secant_slope f x y <= secant_slope f x z.
 Proof.
   intros f Hconv x y z [Hyz Hzx].
-  unfold secant.
+  unfold secant_slope.
 
   assert (Hyx : y < x) by lra.
 
@@ -581,10 +599,10 @@ Qed.
 
 Lemma secant_sym :
   forall (f : R -> R) x y,
-    secant f x y = secant f y x.
+    secant_slope f x y = secant_slope f y x.
 Proof.
   intros f x y.
-  unfold secant.
+  unfold secant_slope.
   apply sub_div_sym_explicit.
 Qed.
 
@@ -593,7 +611,7 @@ Lemma convex_secant_mono_r_l :
     convex f ->
     forall x y z,
       x < y < z ->
-      secant f y x <= secant f z x.
+      secant_slope f y x <= secant_slope f z x.
 Proof.
   intros f Hconv x y z Hxyz.
   rewrite (secant_sym f y x) by lra.
@@ -606,7 +624,7 @@ Lemma convex_secant_mono_r_m :
     convex f ->
     forall x y z,
       y < x < z ->
-      secant f y x <= secant f z x.
+      secant_slope f y x <= secant_slope f z x.
 Proof.
   intros f Hconv x y z Hxyz.
   rewrite (secant_sym f y x) by lra.
@@ -619,7 +637,7 @@ Lemma convex_secant_mono_r_r :
     convex f ->
     forall x y z,
       y < z < x ->
-      secant f y x <= secant f z x.
+      secant_slope f y x <= secant_slope f z x.
 Proof.
   intros f Hconv x y z Hxyz.
   rewrite (secant_sym f y x) by lra.
@@ -634,7 +652,7 @@ Lemma convex_secant_mono_l :
       x <> y ->
       x <> z ->
       y < z ->
-      secant f x y <= secant f x z.
+      secant_slope f x y <= secant_slope f x z.
 Proof.
   intros f Hconv x y z Hxy Hxz Hyz.
   destruct (Rtotal_order x y) as [H1|[H1|H1]];
@@ -654,7 +672,7 @@ Lemma convex_secant_mono_r :
       x <> y ->
       x <> z ->
       y < z ->
-      secant f y x <= secant f z x.
+      secant_slope f y x <= secant_slope f z x.
 Proof.
   intros f Hconv x y z Hxy Hxz Hyz.
   destruct (Rtotal_order x y) as [H1|[H1|H1]];
@@ -666,4 +684,57 @@ Proof.
     apply convex_secant_mono_r_r
   ]; auto; lra.
 Qed.
+
+Lemma convex_secant_mono :
+  forall f : R -> R,
+    convex f ->
+    forall x1 x2 y1 y2,
+      x1 < x2 ->
+      y1 < y2 ->
+      secant_slope f x1 y1 <= secant_slope f x2 y2.
+Proof.
+  intros f Hconv x1 x2 y1 y2 Hx Hy.
+  assert (F:= convex_secant_mono_l _ Hconv x1 y1 y2).
+  destruct (Req_dec x1 y1).
+  + subst.
+Qed.
+
+(* Karamata *)
+
+Theorem KPSsum_deltaS_mono : forall n f (u v: Vector.t R (S n)),
+  convex f ->
+  inv_weak_majorized u v ->
+  0 <= KPSsum_deltaS f u v
+.
+Proof.
+  induction n; intros f u v Hconv [Hu [Hv Hmajo]].
+  - right. trivial.
+  - simpl.
+    specialize (IHn f (tl u) (tl v) Hconv).
+    destruct Hmajo as [L1 Hmajo].
+    inv Hu. app_inj_nat H0.
+    inv Hv. app_inj_nat H0.
+    assert (IHn2 : 0 <= KPSsum_deltaS f (y::v0) (y0::v1)).
+    { apply IHn. split; auto. }
+    destruct Hmajo as [L Hmajo].
+    simpl. simpl in Hmajo, L.
+    destruct H1, H3.
+    + assert (F: secant_slope f y x0 <= secant_slope f y y0).
+      { apply convex_secant_mono_l; auto.
+        
+    Search (secant_slope).
+Theorem Karamata_inequality :
+  forall n f (u v : Vector.t R n),
+  convex f ->
+  weak_majorized u v ->
+  0 <= Ksum f u v
+.
+Proof.
+  induction n; intros f u v Hconv [Hu [Hv Hmajo]].
+  - simpl. lra.
+  - rewrite Ksum_to_Ksum_delta.
+    rewrite Ksum_delta_to_KPsumS.
+    rewrite KPSsumS_to_KPSsum_deltaS.
+    
+
 
