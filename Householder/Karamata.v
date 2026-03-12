@@ -1019,22 +1019,104 @@ Proof.
   apply inv_Karamata_Ksum; auto.
 Qed.
 
+Definition gt_all {n: nat} x (u: Vector.t R n):=
+  Forall (fun a => a <= x) u
+.
+
+Lemma sorted_desc_shiftin_hd: forall n x u,
+  sorted_desc (S (S n)) (shiftin x u) -> x <= (hd u)
+.
+Proof.
+  induction n; intros x u A.
+  - rewrite (eta u) in A.
+    rewrite (nil_spec (tl _)) in A.
+    inv A. app_inj_nat H3.
+    lra.
+  - rewrite (eta u) in A.
+    simpl in A.
+    assert (B:= sorted_desc_tail _ _ _ A).
+    rewrite (eta (tl u)) in A.
+    simpl in A.
+    inv A. app_inj_nat H3.
+    cut (x <= hd (tl u)); [lra|].
+    apply IHn.
+    apply B.
+Qed.
+
+Lemma gt_all_shiftin : forall n x u,
+  sorted_desc (S n) (shiftin x u) -> lt_all x u
+.
+Proof.
+  induction n; intros x u A.
+  - rewrite (nil_spec _). constructor.
+  - rewrite (eta u). constructor.
+    ++ apply sorted_desc_shiftin_hd. auto.
+    ++ apply IHn.
+       apply (sorted_desc_tail _ (hd u)).
+       rewrite (eta u) in A.
+       apply A.
+Qed.
+
+Lemma sorted_desc_shift_tl: forall n x (u: Vector.t R n),
+  sorted_desc _ (shiftin x u) -> sorted_desc n u
+.
+Proof.
+  induction n; intros x u A.
+  - rewrite (nil_spec). constructor.
+  - rewrite (eta u) in A.
+    simpl in A.
+    assert (B:= sorted_desc_tail _ _ _ A).
+    specialize (IHn _ _ B).
+    destruct n.
+    ++ rewrite (eta u). rewrite (nil_spec (tl _)). constructor.
+    ++ rewrite (eta u).
+       rewrite (eta (tl u)).
+       constructor.
+       -- rewrite (eta (tl u)) in A.
+          simpl in A.
+          inv A. app_inj_nat H3.
+          apply H2.
+       -- rewrite (eta (tl u)) in IHn. apply IHn.
+Qed.
+
+Lemma sorted_asc_if_sorted_desc : forall n (u: Vector.t R n),
+  sorted_desc n (rev u) -> sorted_asc n u
+.
+Proof.
+  induction n; intros u A.
+  - rewrite (nil_spec). constructor.
+  - rewrite (eta u) in A.
+    rewrite rev_cons in A.
+    assert (B:= gt_all_shiftin _ _ _ A).
+    rewrite (eta u).
+    apply lt_all_sorted_asc.
+    ++ apply IHn. apply (sorted_desc_shift_tl _ _ _ A).
+    ++ apply Forall_rev. apply B.
+Qed.
+
 Lemma majo_inv_majo : forall n (u v: Vector.t R n),
   majorized (rev u) (rev v) -> inv_majorized u v
 .
 Proof.
+  intros n u v [Su [Sv [L D]]].
+  rewrite 2 vsum_rev in D.
+  apply sorted_asc_if_sorted_desc in Su, Sv.
+  apply majorized_raw_if_inv_majorized_raw in L.
+  split; auto.
+  split; auto.
+Qed.
 
-Theorem Karamata_inequality :
-  forall n f (u v : Vector.t R n),
+
+Theorem Karamata_inequality: forall n f (u v: Vector.t R n),
   convex f ->
   majorized u v ->
-  0 <= Ksum f u v
+  vsum (map f u) >= vsum (map f v)
 .
 Proof.
-  induction n; intros f u v Hconv [Hu [Hv Hmajo]].
-  - simpl. lra.
-  - rewrite Ksum_to_Ksum_delta.
-    rewrite Ksum_delta_to_KPsumS.
-    rewrite KPSsumS_to_KPSsum_deltaS.
-    
-
+  intros n f u v Hconv Hmajo.
+  rewrite <- 2 (vsum_rev _ (map _ _)).
+  rewrite <- 2 map_rev.
+  rewrite <- (rev_rev _ _ u), <- (rev_rev _ _ v) in Hmajo.
+  apply majo_inv_majo in Hmajo.
+  apply inv_Karamata; auto.
+Qed.
