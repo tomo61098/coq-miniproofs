@@ -971,7 +971,7 @@ Proof.
       * simpl. lra.
 Qed.
 
-Theorem inv_Karamata : forall n f (u v: Vector.t R n),
+Theorem inv_Karamata_Ksum : forall n f (u v: Vector.t R n),
   convex f ->
   inv_majorized u v ->
   0 <= Ksum f u v
@@ -993,6 +993,30 @@ Proof.
      apply inv_Karamata_neq; auto.
      destruct Hmajo as [[U [V Hmajo]] _].
      split; auto.
+Qed.
+
+Lemma Ksum_to_vsum : forall n f (u v: Vector.t R n),
+  Ksum f u v = vsum (map f u) - vsum (map f v)
+.
+Proof.
+  induction n; intros f u v.
+  - rewrite (nil_spec u), (nil_spec v). simpl. lra.
+  - rewrite (eta u), (eta v). simpl.
+    rewrite IHn.
+    lra.
+Qed.
+
+Theorem inv_Karamata : forall n f (u v: Vector.t R n),
+  convex f ->
+  inv_majorized u v ->
+  vsum (map f u) >= vsum (map f v)
+.
+Proof.
+  intros n f u v Hconv Hmajo.
+  apply Rminus_ge.
+  apply Rle_ge.
+  rewrite <- Ksum_to_vsum.
+  apply inv_Karamata_Ksum; auto.
 Qed.
 
 Lemma majo_inv_majo : forall n (u v: Vector.t R n),
