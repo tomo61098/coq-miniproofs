@@ -828,6 +828,71 @@ Proof.
       + apply sorted_asc_lt_all_head. auto.
 Qed.
 
+Lemma in_tl_in : forall n (u: Vector.t R (S n)) x,
+  In x (tl u) -> In x u
+.
+Proof. intros. rewrite (eta u). constructor. apply H. Qed.
+
+Lemma in_tl_or : forall n x (u: Vector.t R (S n)),
+  In x u -> x = hd u \/ In x (tl u)
+.
+Proof.
+  intros. rewrite (eta u) in H.
+  destruct (Req_dec x (hd u)).
+  - left. apply H0.
+  - right. inv H.
+    + contradiction.
+    + app_inj_nat H4. apply H3.
+Qed.
+
+Lemma lt_in_step: forall n x y (u: Vector.t R n),
+  lt_all x u -> In y u -> x <= y
+.
+Proof.
+  induction n; intros x y u A B.
+  - rewrite (nil_spec u) in B. inv B.
+  - rewrite (eta u) in A, B.
+    inv B; app_inj_nat H2; inv A.
+    + auto.
+    + app_inj_nat H2. apply (IHn _ _ _ H4 H1).
+Qed.
+
+Lemma lt_in_all: forall m n x (u: Vector.t R n) (v: Vector.t R m),
+  Forall (fun a => In a u) v ->
+  lt_all x u -> lt_all x v
+.
+Proof.
+  induction m; intros n x u v F L.
+    - rewrite (nil_spec v). constructor.
+    - rewrite (eta v). constructor.
+      -- apply (lt_in_step n _ _ u).
+        + apply L.
+        + inv F. app_inj_nat H0. auto.
+      -- apply (IHm _ x u).
+        + rewrite (eta v) in F.
+          inv F. app_inj_nat H1.
+          auto.
+        + apply L.
+Qed.
+
+Lemma inv_weak_majorized_raw_vsum: forall n (u v: Vector.t R n),
+  inv_weak_majorized_raw u v -> vsum u >= vsum v
+.
+Proof.
+  destruct n; intros u v M.
+  - rewrite (nil_spec u), (nil_spec v). lra.
+  - destruct M as [L _].
+    apply L.
+Qed.
+
+Lemma Rge_left: forall x y a b,
+  a + b >= x + y <-> a + b - y >= x
+.
+Proof.
+  intros.
+  split; lra.
+Qed.
+
 Lemma exist_Ksum_prime : forall n f (u v: Vector.t R n),
   exists m u' v',
   @all_neq m u' v' /\
@@ -836,12 +901,13 @@ Lemma exist_Ksum_prime : forall n f (u v: Vector.t R n),
   (sorted_asc _ u -> sorted_asc _ u') /\
   (sorted_asc _ v -> sorted_asc _ v') /\
   (inv_weak_majorized_raw u v -> inv_weak_majorized_raw u' v') /\
-  (vsum u = vsum v -> vsum u' = vsum v') /\
+  (vsum u - vsum v = vsum u' - vsum v') /\
   Ksum f u v = Ksum f u' v'
 .
 Proof.
   induction n; intros f u v.
   - exists O, [], [].
+    rewrite (nil_spec u), (nil_spec v).
     repeat constructor.
   - specialize (IHn f (tl u) (tl v)).
     destruct IHn as [m [u' [v' [Nuv [Au [Av [Su [Sv [W [V K]]]]]]]]]].
@@ -849,19 +915,95 @@ Proof.
     + exists m, u', v'.
       repeat constructor.
       * auto.
-      * admit.
+      * apply (Forall_impl R (fun a => In a (tl u)) (fun a => In a u) (in_tl_in _ _) _ u').
+        auto.
+      * apply (Forall_impl R (fun a => In a (tl v)) (fun a => In a v) (in_tl_in _ _) _ v').
+        auto.
+      * intros A. apply Su.
+        apply sorted_asc_tail, A.
+      * intros A. apply Sv.
+        apply sorted_asc_tail, A.
+      * intros [L A].
+        apply (W A).
+      * rewrite (eta u), (eta v).
+        rewrite H. simpl. lra.
+      * simpl. rewrite H. lra.
+    + exists _, (hd u :: u'), (hd v :: v').
+      repeat (split).
+      * apply H.
+      * apply Nuv.
+      * constructor.
+        ** rewrite (eta u). constructor.
+        **
+       apply (Forall_impl R (fun a => In a (tl u)) (fun a => In a u) (in_tl_in _ _) _ u').
+        auto.
+      * constructor.
+        ** rewrite (eta v). constructor.
+        ** apply (Forall_impl R (fun a => In a (tl v)) (fun a => In a v) (in_tl_in _ _) _ v').
+        auto.
+      * intros A.
+        specialize (Su (sorted_asc_tail _ _ A)).
+        assert (B:=sorted_asc_lt_all_head _ _ A).
+        apply lt_all_sorted_asc.
+        -- apply Su.
+        -- apply (lt_in_all _ _ _ (tl u)); auto.
+      * intros A.
+        specialize (Sv (sorted_asc_tail _ _ A)).
+        assert (B:=sorted_asc_lt_all_head _ _ A).
+        apply lt_all_sorted_asc.
+        -- apply Sv.
+        -- apply (lt_in_all _ _ _ (tl v)); auto.
+      * simpl.
+        destruct H0 as [L A].
+        specialize (W A).
+        assert (B:= inv_weak_majorized_raw_vsum _ _ _ W).
+        assert (D: vsum (tl u) >= vsum (tl v)) by lra.
+        apply Rge_left.
+        rewrite <- Rplus_minus_assoc.
+        rewrite <- V.
+        rewrite Rplus_minus_assoc.
+        apply Rge_left.
+        rewrite (eta u), (eta v) in L.
+        simpl in L. lra.
+      * simpl. apply W.
+        destruct H0. apply H1.
+      * rewrite (eta u), (eta v). simpl. lra.
+      * simpl. lra.
+Qed.
 
 Theorem inv_Karamata : forall n f (u v: Vector.t R n),
   convex f ->
   inv_majorized u v ->
   0 <= Ksum f u v
 .
+Proof.
+  intros n f u v Hconv Hmajo.
+  destruct (exist_Ksum_prime n f u v) as [m [u' [v' [Neq [_ [_ [Su [Sv [Raw [Vs Ks]]]]]]]]]].
+  rewrite Ks.
+  destruct m.
+  -- rewrite (nil_spec u'), (nil_spec v').
+     simpl. lra.
+  -- rewrite (Ksum_to_KPSsum_deltaS _ f u' v').
+     rewrite <- Vs.
+     assert (vsum u = vsum v) by (destruct Hmajo; auto).
+     rewrite H.
+     rewrite Rminus_diag.
+     rewrite Rmult_0_r.
+     rewrite Rplus_0_l.
+     apply inv_Karamata_neq; auto.
+     destruct Hmajo as [[U [V Hmajo]] _].
+     split; auto.
+Qed.
 
+Lemma majo_inv_majo : forall n (u v: Vector.t R n),
+  majorized (rev u) (rev v) -> inv_majorized u v
+.
+Proof.
 
 Theorem Karamata_inequality :
   forall n f (u v : Vector.t R n),
   convex f ->
-  weak_majorized u v ->
+  majorized u v ->
   0 <= Ksum f u v
 .
 Proof.
