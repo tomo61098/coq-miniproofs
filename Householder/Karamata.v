@@ -15,6 +15,27 @@ Definition convex (f : R -> R) : Prop :=
     0 <= t <= 1 ->
     f (t * x + (1 - t) * y) <= t * f x + (1 - t) * f y.
 
+Definition strict_convex (f : R -> R) : Prop :=
+  forall x y t,
+    0 < t < 1 ->
+    f (t * x + (1 - t) * y) < t * f x + (1 - t) * f y.
+
+Lemma strict_convex_convex: forall (f: R -> R),
+  strict_convex f -> convex f
+.
+Proof.
+  intros f St x y t N.
+  destruct (Req_dec 0 t).
+  { subst. rewrite (Rminus_0_r). rewrite ! (Rmult_0_l).
+    rewrite ! Rplus_0_l. rewrite ! Rmult_1_l. right. trivial. }
+  destruct (Req_dec 1 t).
+  { subst. rewrite Rminus_diag. rewrite ! Rmult_1_l. rewrite ! Rmult_0_l.
+    rewrite ! Rplus_0_r. right. trivial. }
+  left.
+  apply St.
+  lra.
+Qed.
+
 Definition secant_slope (f : R -> R) (x y : R) : R :=
   (f y - f x) / (y - x).
 
@@ -449,18 +470,86 @@ Definition inv_majorized {n : nat} (u v: Vector.t R n) :=
 Lemma frac_between_0_1 :
   forall x y z : R,
     x < y < z ->
-    0 <= (z - y) / (z - x) <= 1.
+    0 < (z - y) / (z - x) < 1.
 Proof.
   intros x y z H.
   destruct H as [Hxy Hyz].
   assert (Hzx : 0 < z - x) by lra.
   split.
-  - left. apply Rdiv_lt_0_compat; lra.
-  - apply (Rmult_le_reg_l (z - x)); try lra.
+  - apply Rdiv_lt_0_compat; lra.
+  - apply (Rmult_lt_reg_l (z - x)); try lra.
     rewrite Rmult_1_r.
     rewrite Rmult_comm.
     rewrite <- Rmult_div_swap.
     rewrite Rmult_div_l; lra.
+Qed.
+
+Lemma strict_convex_secant_mono_l_l :
+  forall f : R -> R,
+    strict_convex f ->
+    forall x y z,
+      x < y < z ->
+      secant_slope f x y < secant_slope f x z.
+Proof.
+  intros f Hconv x y z Hxyz.
+  destruct Hxyz as [Hxy Hyz].
+
+  set (t := (z - y) / (z - x)).
+
+  assert (Ht : 0 < t < 1).
+  { apply frac_between_0_1; lra. }
+
+  assert (Hy :
+    y = t * x + (1 - t) * z).
+  {
+    unfold t.
+    field.
+    lra.
+  }
+
+  assert (Hc : f y < t * f x + (1 - t) * f z).
+  {
+    rewrite Hy.
+    apply Hconv.
+    lra.
+  }
+
+  assert (Ht' : 1 - t = (y - x) / (z - x)).
+  {
+    unfold t.
+    field.
+    lra.
+  }
+
+  assert (Hstep :
+    f y - f x < ((y - x) / (z - x)) * (f z - f x)).
+  {
+    replace (t * f x) with ((1 - (1 - t)) * f x) in Hc by lra.
+    rewrite (Rmult_minus_distr_r (f x)) in Hc.
+    rewrite Rmult_1_l in Hc.
+    rewrite Ht' in Hc.
+    unfold t in Hc.
+    lra.
+  }
+
+  unfold secant_slope.
+  apply (Rmult_lt_reg_r (y - x)).
+  { lra. }
+
+  replace (((f y - f x) / (y - x)) * (y - x)) with (f y - f x).
+  2:{
+    field.
+    lra.
+  }
+
+  replace (((f z - f x) / (z - x)) * (y - x))
+    with (((y - x) / (z - x)) * (f z - f x)).
+  2:{
+    field.
+    lra.
+  }
+
+  exact Hstep.
 Qed.
 
 Lemma convex_secant_mono_l_l :
@@ -475,7 +564,7 @@ Proof.
 
   set (t := (z - y) / (z - x)).
 
-  assert (Ht : 0 <= t <= 1).
+  assert (Ht : 0 < t < 1).
   { apply frac_between_0_1; lra. }
 
   assert (Hy :
@@ -490,7 +579,7 @@ Proof.
   {
     rewrite Hy.
     apply Hconv.
-    exact Ht.
+    lra.
   }
 
   assert (Ht' : 1 - t = (y - x) / (z - x)).
@@ -531,6 +620,7 @@ Proof.
   exact Hstep.
 Qed.
 
+
 Lemma sub_div_sym_explicit :
   forall a b c d : R,
     (a - b) / (c - d) = (b - a) / (d - c).
@@ -561,7 +651,7 @@ Proof.
   {
     specialize (Hconv y z ((z - x) / (z - y))).
     assert (Ht : 0 <= (z - x) / (z - y) <= 1).
-    { apply frac_between_0_1; lra. }
+    { assert (0 < (z - x) / (z - y) < 1) by (apply frac_between_0_1; lra). lra. }
     specialize (Hconv Ht).
 
     replace
@@ -587,6 +677,49 @@ Proof.
   field_simplify; nra.
 Qed.
 
+Lemma strict_convex_secant_mono_l_m :
+  forall f : R -> R,
+    strict_convex f ->
+    forall x y z,
+      y < x < z ->
+      secant_slope f x y < secant_slope f x z.
+Proof.
+  intros f Hconv x y z [Hyx Hxz].
+  unfold secant_slope.
+
+  assert (Hyz : y < z) by lra.
+
+  assert
+    (Haux :
+      (z - y) * f x < (z - x) * f y + (x - y) * f z).
+  {
+    specialize (Hconv y z ((z - x) / (z - y))).
+    assert (Ht: 0 < (z - x) / (z - y) < 1) by (apply frac_between_0_1; lra).
+    specialize (Hconv Ht).
+
+    replace
+      (((z - x) / (z - y)) * y +
+       (1 - (z - x) / (z - y)) * z)
+    with x in Hconv.
+    2:{ field; lra. }
+
+    replace
+      ((z - x) / (z - y) * f y +
+       (1 - (z - x) / (z - y)) * f z)
+    with
+      (((z - x) * f y + (x - y) * f z) / (z - y)) in Hconv.
+    2:{ field; lra. }
+
+    apply (Rmult_lt_compat_l (z - y)) in Hconv; [|lra].
+    field_simplify in Hconv; lra.
+  }
+
+  apply (Rmult_lt_reg_l ((x - y) * (z - x))).
+  { nra. }
+  rewrite (sub_div_sym_explicit _ _ y x).
+  field_simplify; nra.
+Qed.
+
 Lemma convex_secant_mono_l_r :
   forall f : R -> R,
     convex f ->
@@ -605,7 +738,7 @@ Proof.
   {
     specialize (Hconv y x ((x - z) / (x - y))).
     assert (Ht : 0 <= (x - z) / (x - y) <= 1).
-    { apply frac_between_0_1; lra. }
+    { assert (0 < (x - z) / (x - y) < 1) by (apply frac_between_0_1; lra). lra. }
     specialize (Hconv Ht).
 
     replace
@@ -630,6 +763,50 @@ Proof.
   field_simplify; nra.
 Qed.
 
+Lemma strict_convex_secant_mono_l_r :
+  forall f : R -> R,
+    strict_convex f ->
+    forall x y z,
+      y < z < x ->
+      secant_slope f x y < secant_slope f x z.
+Proof.
+  intros f Hconv x y z [Hyz Hzx].
+  unfold secant_slope.
+
+  assert (Hyx : y < x) by lra.
+
+  assert
+    (Haux :
+      (x - y) * f z < (x - z) * f y + (z - y) * f x).
+  {
+    specialize (Hconv y x ((x - z) / (x - y))).
+    assert (Ht : 0 < (x - z) / (x - y) < 1).
+    { apply frac_between_0_1. lra. }
+    specialize (Hconv Ht).
+
+    replace
+      (((x - z) / (x - y)) * y +
+       (1 - (x - z) / (x - y)) * x)
+    with z in Hconv.
+    2:{ field; lra. }
+
+    replace
+      ((x - z) / (x - y) * f y +
+       (1 - (x - z) / (x - y)) * f x)
+    with
+      (((x - z) * f y + (z - y) * f x) / (x - y)) in Hconv.
+    2:{ field; lra. }
+
+    apply (Rmult_lt_compat_l (x - y)) in Hconv; [|lra].
+    field_simplify in Hconv; lra.
+  }
+
+  apply (Rmult_lt_reg_l ((x - y) * (x - z))); [nra|].
+  rewrite 2 (sub_div_sym_explicit _ _ _ x).
+  field_simplify; nra.
+Qed.
+
+
 Lemma secant_sym :
   forall (f : R -> R) x y,
     secant_slope f x y = secant_slope f y x.
@@ -652,6 +829,19 @@ Proof.
   apply convex_secant_mono_l_l; assumption.
 Qed.
 
+Lemma strict_convex_secant_mono_r_l :
+  forall f : R -> R,
+    strict_convex f ->
+    forall x y z,
+      x < y < z ->
+      secant_slope f y x < secant_slope f z x.
+Proof.
+  intros f Hconv x y z Hxyz.
+  rewrite (secant_sym f y x) by lra.
+  rewrite (secant_sym f z x) by lra.
+  apply strict_convex_secant_mono_l_l; assumption.
+Qed.
+
 Lemma convex_secant_mono_r_m :
   forall f : R -> R,
     convex f ->
@@ -665,6 +855,19 @@ Proof.
   apply convex_secant_mono_l_m; assumption.
 Qed.
 
+Lemma strict_convex_secant_mono_r_m :
+  forall f : R -> R,
+    strict_convex f ->
+    forall x y z,
+      y < x < z ->
+      secant_slope f y x < secant_slope f z x.
+Proof.
+  intros f Hconv x y z Hxyz.
+  rewrite (secant_sym f y x) by lra.
+  rewrite (secant_sym f z x) by lra.
+  apply strict_convex_secant_mono_l_m; assumption.
+Qed.
+
 Lemma convex_secant_mono_r_r :
   forall f : R -> R,
     convex f ->
@@ -676,6 +879,19 @@ Proof.
   rewrite (secant_sym f y x) by lra.
   rewrite (secant_sym f z x) by lra.
   apply convex_secant_mono_l_r; assumption.
+Qed.
+
+Lemma strict_convex_secant_mono_r_r :
+  forall f : R -> R,
+    strict_convex f ->
+    forall x y z,
+      y < z < x ->
+      secant_slope f y x < secant_slope f z x.
+Proof.
+  intros f Hconv x y z Hxyz.
+  rewrite (secant_sym f y x) by lra.
+  rewrite (secant_sym f z x) by lra.
+  apply strict_convex_secant_mono_l_r; assumption.
 Qed.
 
 Lemma convex_secant_mono_l :
@@ -695,6 +911,26 @@ Proof.
     apply convex_secant_mono_l_l |
     apply convex_secant_mono_l_m |
     apply convex_secant_mono_l_r
+  ]; auto; lra.
+Qed.
+
+Lemma strict_convex_secant_mono_l :
+  forall f : R -> R,
+    strict_convex f ->
+    forall x y z,
+      x <> y ->
+      x <> z ->
+      y < z ->
+      secant_slope f x y < secant_slope f x z.
+Proof.
+  intros f Hconv x y z Hxy Hxz Hyz.
+  destruct (Rtotal_order x y) as [H1|[H1|H1]];
+  destruct (Rtotal_order x z) as [H2|[H2|H2]];
+  try lra;
+  [
+    apply strict_convex_secant_mono_l_l |
+    apply strict_convex_secant_mono_l_m |
+    apply strict_convex_secant_mono_l_r
   ]; auto; lra.
 Qed.
 
@@ -718,6 +954,26 @@ Proof.
   ]; auto; lra.
 Qed.
 
+Lemma strict_convex_secant_mono_r :
+  forall f : R -> R,
+    strict_convex f ->
+    forall x y z,
+      x <> y ->
+      x <> z ->
+      y < z ->
+      secant_slope f y x < secant_slope f z x.
+Proof.
+  intros f Hconv x y z Hxy Hxz Hyz.
+  destruct (Rtotal_order x y) as [H1|[H1|H1]];
+  destruct (Rtotal_order x z) as [H2|[H2|H2]];
+  try lra;
+  [
+    apply strict_convex_secant_mono_r_l |
+    apply strict_convex_secant_mono_r_m |
+    apply strict_convex_secant_mono_r_r
+  ]; auto; lra.
+Qed.
+
 Lemma convex_secant_mono : forall f x1 x2 y1 y2,
   convex f ->
   x1 <> y1 ->
@@ -737,6 +993,27 @@ Proof.
     assert (B:= convex_secant_mono_r f H y2 x1 x2).
     lra.
 Qed.
+
+Lemma strict_convex_secant_mono : forall f x1 x2 y1 y2,
+  strict_convex f ->
+  x1 <> y1 ->
+  x2 <> y2 ->
+  x1 < x2 ->
+  y1 < y2 ->
+  secant_slope f x1 y1 < secant_slope f x2 y2
+.
+Proof.
+  intros.
+  destruct (Req_dec x1 y2).
+  - subst.
+    rewrite secant_sym.
+    apply strict_convex_secant_mono_r; auto.
+    lra.
+  - assert (A:= strict_convex_secant_mono_l f H x1 y1 y2 H0 H4 H3).
+    assert (B:= strict_convex_secant_mono_r f H y2 x1 x2).
+    lra.
+Qed.
+
 
 (* Karamata *)
 
@@ -1120,3 +1397,187 @@ Proof.
   apply majo_inv_majo in Hmajo.
   apply inv_Karamata; auto.
 Qed.
+
+Lemma vsum_const_mult: forall n x u,
+  u = const x n ->
+  vsum u = INR n * x
+.
+Proof.
+  induction n; intros x u C.
+  - rewrite (nil_spec u). simpl. lra.
+  - specialize (IHn _ _ (f_equal tl C)).
+    apply (f_equal hd) in C.
+    rewrite (eta u). simpl vsum.
+    rewrite IHn.
+    rewrite C. rewrite S_INR.
+    simpl. lra.
+Qed.
+
+Lemma vsum_const : forall n x y u v,
+  u = const x (S n) ->
+  v = const y (S n) ->
+  vsum u = vsum v ->
+  x = y
+.
+Proof.
+  intros n x y u v U V Suv.
+  apply vsum_const_mult in U, V.
+  rewrite U, V in Suv.
+  assert (INR (S n) <> 0).
+  { apply not_0_INR. lia. }
+  apply (Rmult_eq_reg_l) in Suv; auto.
+Qed.
+
+Theorem KPSsum_deltaS_0 : forall n f (u v: Vector.t R (S n)),
+  strict_convex f ->
+  all_neq u v ->
+  inv_weak_majorized u v ->
+  KPSsum_deltaS f u v = 0 ->
+  exists x y, u = const x _ /\ v = const y _
+.
+Proof.
+  induction n; intros f u v Hconv [Huv Hneq] [Hu [Hv [V Hmajo]]] K.
+  - exists (hd u), (hd v). rewrite (eta u), (eta v).
+    simpl. rewrite 2 (nil_spec (tl _)). split; trivial.
+  - simpl in K.
+    assert (Mm: inv_weak_majorized (tl u) (tl v)).
+    { split.
+      -- apply sorted_asc_tail. apply Hu.
+      -- split.
+      + apply sorted_asc_tail. apply Hv.
+      + apply Hmajo. }
+    assert (A: 0 <= KPSsum_deltaS f (tl u) (tl v)).
+    { apply inv_Karamata_neq; auto.
+      apply strict_convex_convex, Hconv. }
+    apply inv_weak_majorized_raw_vsum in Hmajo.
+    rewrite (eta u) in Hu.
+    rewrite (eta (tl u)) in Hu.
+    inv Hu. app_inj_nat H3.
+    rewrite (eta v) in Hv.
+    rewrite (eta (tl v)) in Hv.
+    inv Hv. app_inj_nat H5.
+    assert (E1: 0 <= vsum (tl u) - vsum (tl v)) by lra.
+    destruct H2, H3; [
+      assert (F: secant_slope f (hd u) (hd v) < secant_slope f (hd (tl u)) (hd (tl v)))
+      by (destruct Hneq; apply strict_convex_secant_mono; auto) |
+      assert (F: secant_slope f (hd u) (hd v) < secant_slope f (hd (tl u)) (hd (tl v)))
+      by (destruct Hneq; rewrite H0; apply strict_convex_secant_mono_r; auto; rewrite <- H0; auto) |
+      assert (F: secant_slope f (hd u) (hd v) < secant_slope f (hd (tl u)) (hd (tl v)))
+      by (destruct Hneq; rewrite H; apply strict_convex_secant_mono_l; auto; rewrite <- H; auto) |
+      ].
+    1,2,3:
+    assert (E22: 0 < secant_slope f (hd (tl u)) (hd (tl v)) -
+    secant_slope f (hd u) (hd v)) by lra;
+    assert (E2: 0 <= secant_slope f (hd (tl u)) (hd (tl v)) -
+    secant_slope f (hd u) (hd v)) by lra;
+    assert (E:= Rmult_le_pos _ _ E2 E1);
+    destruct (Rplus_eq_0 _ _ E A (K)) as [V2 K2];
+    specialize (IHn _ _ _ Hconv Hneq Mm (K2));
+    destruct IHn as [x [y [Cu Cv]]];
+    destruct (Rmult_integral _ _ V2); [lra|];
+    assert (G: vsum (tl u) = vsum (tl v)) by lra;
+    apply (vsum_const _ _ _ _ _ Cu Cv) in G;
+    rewrite G in Cu; apply (f_equal hd) in Cu, Cv;
+    rewrite (eta u) in Cu; rewrite (eta v) in Cv;
+    simpl in Cu, Cv; destruct Hneq; lra.
+
+    rewrite H, H0 in K.
+    rewrite Rminus_diag in K.
+    rewrite Rmult_0_l in K.
+    rewrite Rplus_0_l in K.
+    specialize (IHn _ _ _ Hconv Hneq Mm (K)).
+    destruct (IHn) as [x [y [Cu Cv]]].
+    exists x, y.
+    
+    assert (Cuh:= f_equal hd Cu).
+    assert (Cvh:= f_equal hd Cv).
+    rewrite <- H in Cuh.
+    rewrite <- H0 in Cvh.
+    simpl in Cuh, Cvh.
+    rewrite (eta u), (eta v).
+    rewrite Cu, Cv,Cuh, Cvh.
+    auto.
+Qed.
+
+Theorem Karamata_inv_Ksum_0: forall n f u v,
+  strict_convex f ->
+  @inv_majorized n u v ->
+  Ksum f u v = 0 ->
+  u = v
+.
+Proof.
+  induction n; intros f u v Hconv [[Su [Sv Hmajo]] V] HKsum.
+  - rewrite nil_spec. apply nil_spec.
+  - destruct (Req_dec (hd u) (hd v)).
+    + rewrite (eta u), (eta v). rewrite H. f_equal.
+      apply (IHn f); auto.
+      ++ split.
+        ** split. * apply sorted_asc_tail. auto.
+           * split. -- apply sorted_asc_tail. auto.
+           -- destruct Hmajo. auto.
+        ** rewrite (eta u), (eta v) in V.
+           rewrite H in V.
+           simpl in V. lra.
+      ++ simpl in HKsum. rewrite H in HKsum. lra.
+    +
+    destruct (exist_Ksum_prime _ f (tl u) (tl v)) as [m [u' [v' [N [Iu [Iv [Su' [Sv' [W [Vn HH]]]]]]]]]].
+    destruct m.
+    { rewrite (nil_spec u'), (nil_spec v') in Vn. simpl in Vn.
+      assert (A: vsum (tl u) = vsum (tl v)) by lra.
+      rewrite (eta u), (eta v) in V.
+      simpl in V. rewrite A in V.
+      lra. }
+
+    specialize (Su' (sorted_asc_tail _ _ Su)).
+    specialize (Sv' (sorted_asc_tail _ _ Sv)).
+    specialize (W (proj2 Hmajo)).
+    assert (HHKsum: Ksum f (hd u :: u') (hd v :: v') = 0).
+    { simpl. simpl in HH. rewrite <- HH. simpl in HKsum. rewrite HKsum. trivial. }
+    rewrite (Ksum_to_KPSsum_deltaS) in HHKsum.
+    assert (A: 0 <= KPSsum_deltaS f u' v').
+    { apply inv_Karamata_neq; auto.
+      apply strict_convex_convex, Hconv. split; auto. }
+    simpl hd in HHKsum.
+    simpl vsum in HHKsum.
+    replace (hd u + vsum u' - (hd v + vsum v')) with (hd u + vsum (tl u) - (hd v + vsum (tl v))) in HHKsum by lra.
+    rewrite (eta u), (eta v) in V.
+    simpl in V. rewrite V in HHKsum.
+    rewrite Rminus_diag in HHKsum.
+    rewrite Rmult_0_r in HHKsum.
+    rewrite Rplus_0_l in HHKsum.
+    assert (Vv': vsum (hd u :: u') = vsum (hd v :: v')) by (simpl; lra).
+    destruct (KPSsum_deltaS_0 _ f (hd u :: u') (hd v :: v')) as [x [y [Hl Hr]]]; auto.
+    ++ constructor; auto.
+    ++ assert (LTu:= sorted_asc_lt_all_head _ _ Su).
+       assert (LTv:= sorted_asc_lt_all_head _ _ Sv).
+       split.
+       +++ apply lt_all_sorted_asc; auto.
+           apply (lt_in_all _ _ _ _ _ Iu LTu).
+       +++ split; auto.
+       --- apply lt_all_sorted_asc; auto.
+           apply (lt_in_all _ _ _ _ _ Iv LTv).
+       --- split; auto.
+           simpl. lra.
+    ++ assert (C:= vsum_const _ _ _ _ _ Hl Hr Vv').
+    rewrite C in Hl.
+    assert (Hlh := f_equal hd Hl).
+    assert (Hrh := f_equal hd Hr).
+    simpl in Hlh, Hrh.
+    lra.
+Qed.
+
+Definition cond_convex := forall (P: R -> Prop) f,
+  (forall x y, P x -> P y -> forall t, 0 <= t <= 1 -> P (t * x + (1 - t) * y)) ->
+  forall x y t,
+    P x -> P y ->
+    0 <= t <= 1 ->
+    f (t * x + (1 - t) * y) <= t * f x + (1 - t) * f y
+.
+
+Definition cond_strict_convex := forall (P: R -> Prop) f,
+  (forall x y, P x -> P y -> forall t, 0 <= t <= 1 -> P (t * x + (1 - t) * y)) ->
+  forall x y t,
+    P x -> P y ->
+    0 < t < 1 ->
+    f (t * x + (1 - t) * y) < t * f x + (1 - t) * f y
+.
