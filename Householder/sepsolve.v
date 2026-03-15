@@ -41,7 +41,7 @@ Proof.
         ++ rewrite 2dot_0. lra.
         ++ constructor; auto. rewrite 2dot_0. lra.
 Qed.
-
+  
 Definition is_binary {n: nat} (u: vec n) :=
   Forall (fun x: R => x = 0 \/ x = 1)%R u
 .
@@ -666,6 +666,24 @@ Definition missing_separation {n: nat} (a: vec n)
   Rmax 0 (1 - separation a g1 g2)
 .
 
+Lemma Rmax_le_l: forall a b c,
+  Rmax a b <= c -> a <= c
+.
+Proof.
+  intros a b c A.
+  unfold Rmax in A.
+  destruct (Rle_dec a b); lra.
+Qed.
+
+Lemma Rmax_le_r: forall a b c,
+  Rmax a b <= c -> b <= c
+.
+Proof.
+  intros a b c A.
+  unfold Rmax in A.
+  destruct (Rle_dec a b); lra.
+Qed.
+
 Theorem beta_to_separated :
   forall (n: nat) (a: vec n) (g1 g2: gaussian) (b: R),
   let (_, sig1) := g1 in
@@ -675,10 +693,23 @@ Theorem beta_to_separated :
 .
 Proof.
   intros n a [mu1 sig1] [mu2 sig2] b N.
-  induction n.
-  - rewrite (eta0 a) in N. simpl in N.
-    destruct N; lra.
-  - 
+  split; intros A.
+  - unfold missing_separation in A.
+    unfold separation in A.
+    assert (Al:= Rmax_le_l _ _ _ A).
+    assert (Ar:= Rmax_le_r _ _ _ A).
+    assert (0 < Rmax (dot a sig1) (dot a sig2)).
+    { destruct N;
+      unfold Rmax; destruct Rle_dec; lra. }
+    assert (Br: (1 - b) * Rmax (dot a sig1) (dot a sig2) <= dot a (sqvec (mu1 - mu2))).
+    { apply (Rmult_le_reg_r _ _ _ (Rinv_0_lt_compat _ H)).
+      field_simplify; lra. }
+    rewrite Rmax_dist_mult_l in Br.
+    
+    Search (c_separates).
+    split; split.
+    Search (_ * Rmax _ _)%R.
+    Search (_ * Rmax _ _)%R.
   
 
 Close Scope vec_scope.
