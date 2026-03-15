@@ -1,56 +1,53 @@
-Load sepsolve_convex.
+Load Karamata.
+Load sepsolve_vec.
 Open Scope R_scope.
 Open Scope vec_scope.
 
 Definition gaussian {n: nat} := (vec n * vec n)%type.
 
-Fixpoint is_ca_separated {n: nat} (c: R) (a: vec n)
-  (g: @gaussian n) (l: list (@gaussian n)): Prop.
+Fixpoint is_ca_separated {n m: nat} (c: R) (a: vec n)
+  (g: @gaussian n) (l: Vector.t (@gaussian n) m): Prop.
 destruct l.
   - apply True.
   - inversion g as [mu sigm].
-    destruct g0 as [mu2 sigm2].
+    destruct h as [mu2 sigm2].
     apply (
       c * dot a sigm  <= dot a (sqvec (mu - mu2)) /\
       c * dot a sigm2 <= dot a (sqvec (mu - mu2)) /\
-      is_ca_separated n c a g l
+      is_ca_separated n n0 c a g l
     ).
 Defined.
 
-Fixpoint c_separates {n: nat} (c: R) (a: vec n)
-  (l: list (@gaussian n)) : Prop.
+Fixpoint c_separates {n m: nat} (c: R) (a: vec n)
+  (l: Vector.t (@gaussian n) m) : Prop.
 destruct l.
   - apply True.
   - apply (
-      is_ca_separated c a g l /\
-      c_separates n c a l
+      is_ca_separated c a h l /\
+      c_separates n n0 c a l
     ).
 Defined.
 
-Goal forall (n: nat) (c: R) (l: list (@gaussian n)),
+Goal forall (n m: nat) (c: R) (l: Vector.t (@gaussian n) m),
   c_separates c 0 l.
 Proof.
   induction l.
     - reflexivity.
     - simpl. constructor; auto.
-      cut (forall n c (g: @gaussian n) l, is_ca_separated c 0 g l); auto.
+      cut (forall n m c (g: @gaussian n) (l: Vector.t _ m), @is_ca_separated n _ c 0 g l); auto.
       intros. induction l0.
       + reflexivity.
-      + simpl. destruct g, a0. constructor; auto.
+      + simpl. destruct g, h0. constructor; auto.
         ++ rewrite 2dot_0. lra.
         ++ constructor; auto. rewrite 2dot_0. lra.
 Qed.
 
-Inductive is_binary : forall {n:nat}, vec n -> Prop :=
-  | bin_nil  : is_binary []
-  | bin_zero : forall (n: nat) (l: vec n), 
-    is_binary l -> is_binary (0%R::l)
-  | bin_one  : forall (n: nat) (l: vec n),
-    is_binary l -> is_binary (1%R::l)
+Definition is_binary {n: nat} (u: vec n) :=
+  Forall (fun x: R => x = 0 \/ x = 1)%R u
 .
 
-Definition c_separated_valid {n: nat}
-  (c: R) (m: nat) (a: vec n) (l: list gaussian) :=
+Definition c_separated_valid {n k: nat}
+  (c: R) (m: nat) (a: vec n) (l: Vector.t gaussian k) :=
   is_binary a /\
   dot a 1 = (INR m) /\
   c_separates c a l
@@ -60,10 +57,8 @@ Definition is_partition {n: nat} (a s: vec n) :=
   is_binary a /\ dot a s = dot s 1 / 2
 .
 
-Inductive is_positive: forall {n: nat}, vec n -> Prop :=
-  | pos_nil : is_positive []
-  | pos_con : forall (n: nat) (x: R) (xs: vec n),
-    (0 < x)%R -> is_positive xs -> is_positive (x::xs)
+Definition is_positive {n: nat} (u: vec n) :=
+  Forall (fun x => 0 < x)%R u
 .
 
 
@@ -73,14 +68,12 @@ Inductive is_vec_leq : forall {n: nat}, vec n -> vec n -> Prop :=
     a <= b -> is_vec_leq x y -> is_vec_leq (a::x) (b::y)
 .
 
-Ltac app_inj_nat H := apply (inj_pair2_eq_dec _ Nat.eq_dec) in H; subst.
-
 Lemma pos_leq: forall (n: nat) (x: vec n),
   is_positive x -> is_vec_leq 0 x.
 Proof.
   induction x.
     - constructor.
-    - intros. demake H.
+    - intros. inv H.
       app_inj_nat H2.
       subst. constructor; auto. lra.
 Qed.
@@ -93,16 +86,16 @@ Lemma dot_vec_noneg:
 Proof.
   induction n; intros.
     - rewrite (eta0 _). simpl. lra.
-    - demake H.
-      demake H0.
+    - inv H.
+      inv H0.
       app_inj_nat H3.
       app_inj_nat H2.
-      app_inj_nat H1.
+      app_inj_nat H7.
       app_inj_nat H4.
       subst.
       rewrite !dot_step. simpl.
-      specialize (IHn _ _ _ H6 H8).
-      apply (Rmult_le_compat_l _ _ _ H5) in H7.
+      specialize (IHn _ _ _ H6 H9).
+      apply (Rmult_le_compat_l _ _ _ H5) in H8.
       lra.
 Qed.
 
@@ -112,14 +105,14 @@ Lemma dot_vec_noneg_0: forall (n: nat) (x y: vec n),
 Proof.
   induction n; intros.
     - rewrite (eta0 x). simpl. lra.
-    - demake H. demake H0.
-      app_inj_nat H2.
+    - inv H. inv H0.
+      app_inj_nat H8.
       app_inj_nat H7.
       app_inj_nat H4.
       app_inj_nat H3.
       subst. rewrite dot_step. simpl.
-      specialize (IHn _ _ H6 H9).
-      assert (A:= Rmult_le_pos _ _ H5 H8).
+      specialize (IHn _ _ H6 H10).
+      assert (A:= Rmult_le_pos _ _ H5 H9).
       lra.
 Qed.
 
@@ -137,13 +130,13 @@ Proof.
       unfold multvec in IHn.
       rewrite (IHn H).
       f_equal.
-      demake H0.
+      inv H0.
       --
       app_inj_nat H3.
       app_inj_nat H4.
       subst. simpl.
       apply (sqrt_mult _ _ H H5).
-      -- demake H0.
+      -- inv H0.
          app_inj_nat H3.
          app_inj_nat H4.
          subst. auto.
@@ -156,7 +149,7 @@ Lemma sq_sqrt_vec: forall (n: nat) (u: vec n),
 Proof.
   induction n; intros.
     - rewrite eta0. apply eta0.
-    - demake H.
+    - inv H.
       app_inj_nat H2.
       app_inj_nat H3.
       subst. cbn.
@@ -166,14 +159,12 @@ Proof.
       f_equal. apply sqrt_def. apply H4.
 Qed.
 
-Definition partition_to_gaussians {n: nat} (m: nat) (s: vec n) : list (@gaussian n) :=
-Datatypes.cons (0,zipvecs Rmin ((2*(INR m))*s) 1) (
-  Datatypes.cons ((sqrt (2*(INR m)/dot s 1) * (sqrtvec s), 1)) (
-    Datatypes.cons (
-      (- ((sqrt (dot s 1)) * 1), (2*(INR m)) * s))
-    Datatypes.nil
-))
-.
+Definition partition_to_gaussians {n: nat} (m: nat) (s: vec n) : Vector.t (@gaussian n) 3 :=
+[
+  (0,zipvecs Rmin ((2*(INR m))*s) 1) ;
+  (sqrt (2*(INR m)/dot s 1) * (sqrtvec s), 1) ;
+  (- ((sqrt (dot s 1)) * 1), (2*(INR m)) * s)
+].
 
 Theorem cm_separated_NP_completness_left:
   forall (n: nat) (s: vec n),
@@ -195,7 +186,7 @@ Proof.
   rewrite Rmult_1_l in E, G.
   rewrite sqvec_dist in G.
   assert (B2: forall (n: nat) (f: vec (S n)), is_positive f -> 0 < dot f 1). 
-  { intros. demake H.
+  { intros. inv H.
     app_inj_nat H1.
     subst. rewrite dot_step. simpl.
     apply pos_leq in H3.
@@ -259,12 +250,13 @@ Proof.
   induction n; intros.
     - rewrite (eta0 a) in H1.
       simpl in H1. lra.
-    - demake H; app_inj_nat H3;
-      demake H0; app_inj_nat H2;
-      rewrite dot_step in H1; simpl in H1.
+    - inv H; app_inj_nat H3;
+      inv H0; app_inj_nat H3;
+      rewrite dot_step in H1; simpl in H1;
+      destruct H4; subst.
       + rewrite Rmult_0_l in H1.
         rewrite Rplus_0_l in H1.
-        specialize (IHn _ _ H4 H5 H1).
+        specialize (IHn _ _ H5 H7 H1).
         simpl. destruct Req_dec_T; auto.
       + simpl. destruct Req_dec_T.
         * lia.
@@ -276,9 +268,9 @@ Lemma pos_dot_1: forall (n: nat) (p: vec (S n)),
 .
 Proof.
   induction n; intros.
-    - demake H. app_inj_nat H1.
-      rewrite dot_step, (eta0 xs). simpl. lra.
-    - demake H. app_inj_nat H1.
+    - inv H. app_inj_nat H1.
+      rewrite dot_step, (eta0 v). simpl. lra.
+    - inv H. app_inj_nat H1.
       specialize (IHn _ H3).
       rewrite dot_step.
       simpl. rewrite Rmult_1_r.
@@ -294,14 +286,13 @@ Proof.
   induction a; intros.
     - auto.
     - simpl.
-      demake H; app_inj_nat H3;
-      cbn; destruct (Req_dec_T).
+      inv H; app_inj_nat H2;
+      cbn; destruct (Req_dec_T), H3; subst.
       + lra.
-      + rewrite (IHa H2). lra.
-      + rewrite S_O_plus_INR_depr.
-        rewrite (IHa H2). simpl INR.
-        lra.
-      + lra.
+      + rewrite S_INR. rewrite (IHa H4). lra.
+      + rewrite Rmult_0_l, Rplus_0_l. apply IHa.
+        apply H4.
+      + contradiction.
 Qed.
 
 Lemma is_bin_is_pos_dot_leq : forall (n: nat) (a b: vec n),
@@ -311,9 +302,10 @@ Lemma is_bin_is_pos_dot_leq : forall (n: nat) (a b: vec n),
 Proof.
   induction n; intros.
     - rewrite (eta0 a), (eta0 b). simpl. lra.
-    - demake H; app_inj_nat H2;
-      demake H0; app_inj_nat H1;
-      specialize (IHn _ _ H3 H4);
+    - inv H; app_inj_nat H2;
+      inv H0; app_inj_nat H2.
+      destruct H3; subst;
+      specialize (IHn _ _ H4 H6);
       rewrite dot_step; cbn; lra.
 Qed.
 
@@ -327,7 +319,7 @@ Proof.
       simpl. lra.
     - rewrite (eta u), (eta v), (eta w).
       rewrite 2(dot_step (hd _ :: _) _).
-      demake H. app_inj_nat H2. app_inj_nat H3.
+      inv H. app_inj_nat H2. app_inj_nat H3.
       simpl hd. simpl tl.
       specialize (IHn y (tl v) (tl w) H5).
       assert (A:= Rmin_r (hd v) (hd w)).
@@ -342,7 +334,7 @@ Proof.
   induction a.
     - constructor.
     - intros.
-      demake H; app_inj_nat H3;
+      inv H. app_inj_nat H2.
       constructor; auto; lra.
 Qed.
 
@@ -369,14 +361,14 @@ Lemma sqvec_plus_leq: forall {n: nat} (a u v: vec n),
 Proof.
   induction n; intros.
     - rewrite (eta0 a). simpl. lra.
-    - demake H. demake H0. demake H1.
+    - inv H. inv H0. inv H1.
       app_inj_nat H4.
       app_inj_nat H5.
-      app_inj_nat H2.
-      app_inj_nat H11.
+      app_inj_nat H13.
+      app_inj_nat H12.
       app_inj_nat H8.
-      app_inj_nat H3.
-      specialize (IHn _ _ _ H7 H10 H13).
+      app_inj_nat H9.
+      specialize (IHn _ _ _ H7 H11 H15).
       assert (E:= Rle_0_sqr b0).
       rewrite Rsqr_def in E.
       assert (F: (b0 <= b0 + b1)%R) by lra.
@@ -384,7 +376,7 @@ Proof.
       rewrite Rsqr_def in E2.
       apply (Rmult_le_compat_l _ _ _ H6) in E, E2.
       rewrite Rmult_0_r in E, E2.
-      assert (F2:= Rmult_le_compat _ _ _ _ H9 H9 F F).
+      assert (F2:= Rmult_le_compat _ _ _ _ H10 H10 F F).
       apply (Rmult_le_compat_l _ _ _ H6) in F2.
       cbn.
       unfold sqvec, plusvecs in IHn.
@@ -408,11 +400,11 @@ Lemma L3: forall (n: nat) (a: R) (s: vec n),
 Proof.
   induction n; intros.
   - constructor.
-  - demake H. app_inj_nat H2.
+  - inv H. app_inj_nat H2.
     rewrite dot_step.
     simpl hd. simpl tl. rewrite Rmult_1_r.
-    assert (A:= dot_vec_noneg_0 n xs 1 (pos_leq _ xs H4) (is_vec_leq_1 n)).
-    assert (A2: 0 <= x + dot xs 1) by lra.
+    assert (A:= dot_vec_noneg_0 n v 1 (pos_leq _ v H4) (is_vec_leq_1 n)).
+    assert (A2: 0 <= x + dot v 1) by lra.
     rewrite vec_mult_step.
     simpl hd. simpl tl.
     cbn.
@@ -429,7 +421,7 @@ Lemma L4: forall (n: nat) (a: R) (b: vec n),
 Proof.
   induction n; intros.
     - rewrite eta0. constructor.
-    - demake H0. app_inj_nat H3. app_inj_nat H4.
+    - inv H0. app_inj_nat H3. app_inj_nat H4.
       simpl. cbn. apply vclq_con.
     + apply (Rmult_le_compat_l _ _ _ H) in H5. lra.
     + apply IHn; auto.
@@ -441,7 +433,7 @@ Lemma L5: forall (n: nat) (b: vec n),
 Proof.
   induction b.
   - constructor.
-  - intros. demake H. app_inj_nat H2.
+  - intros. inv H. app_inj_nat H2.
     app_inj_nat H5.
     cbn.
     constructor.
@@ -679,7 +671,7 @@ Theorem beta_to_separated :
   let (_, sig1) := g1 in
   let (_, sig2) := g2 in
   0 < dot a sig1 \/ 0 < dot a sig2 -> 
-  (missing_separation a g1 g2 <= b <-> c_separates (1 - b) a (g1 :: g2 :: Datatypes.nil))
+  (missing_separation a g1 g2 <= b <-> c_separates (1 - b) a [g1 ; g2])
 .
 Proof.
   intros n a [mu1 sig1] [mu2 sig2] b N.
