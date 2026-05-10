@@ -1,3 +1,4 @@
+Require Import Psatz.
 Load Karamata.
 Load sepsolve_vec.
 Open Scope R_scope.
@@ -41,10 +42,32 @@ Proof.
         ++ rewrite 2dot_0. lra.
         ++ constructor; auto. rewrite 2dot_0. lra.
 Qed.
-  
-Definition is_binary {n: nat} (u: vec n) :=
-  Forall (fun x: R => x = 0 \/ x = 1)%R u
+
+(* Equal-cardinality partition: binary selector, exactly m entries,
+   and selected sum is half of total sum. *)
+Definition is_ec_partition {d : nat} (a s : vec d) : Prop :=
+  is_binary a /\
+  dot a 1 = INR d / 2 /\
+  dot a s = dot s 1 / 2
 .
+
+Definition has_ec_partition {d : nat} (s : vec d) : Prop :=
+  exists a, is_ec_partition a s.
+
+
+(* The three Gaussians from the reduction. *)
+Definition red_g1 {d : nat} : @gaussian d :=
+  (0, 1).
+
+Definition red_g2 {d : nat} (s : vec d) : @gaussian d :=
+  (INR d / 2 * sqrtvec s, INR d / 2 * 1).
+
+Definition red_g3 {d : nat} (s : vec d) : @gaussian d :=
+  (- (dot s 1 / 2 * 1), INR d / 2 * s).
+
+Definition red_instance {d : nat} (s: vec d)
+  : Vector.t (@gaussian d) 3 :=
+  [red_g1; red_g2 s; red_g3 s].
 
 Definition c_separated_valid {n k: nat}
   (c: R) (m: nat) (a: vec n) (l: Vector.t gaussian k) :=
@@ -53,664 +76,349 @@ Definition c_separated_valid {n k: nat}
   c_separates c a l
 .
 
-Definition is_partition {n: nat} (a s: vec n) :=
-  is_binary a /\ dot a s = dot s 1 / 2
+Lemma red_12:
+  forall {n: nat} (d: nat) (a s: vec n),
+  dot a (sqvec (0 - INR (2 * d) / 2 * sqrtvec s))
+  = (INR d * INR d * dot a (sqvec (sqrtvec s)))%R
 .
-
-Definition is_positive {n: nat} (u: vec n) :=
-  Forall (fun x => 0 < x)%R u
-.
-
-
-Inductive is_vec_leq : forall {n: nat}, vec n -> vec n -> Prop :=
-  | vclq_nil : is_vec_leq [] []
-  | vclq_con : forall (n: nat) (a b: R) (x y: vec n),
-    a <= b -> is_vec_leq x y -> is_vec_leq (a::x) (b::y)
-.
-
-Lemma pos_leq: forall (n: nat) (x: vec n),
-  is_positive x -> is_vec_leq 0 x.
 Proof.
-  induction x.
-    - constructor.
-    - intros. inv H.
-      app_inj_nat H2.
-      subst. constructor; auto. lra.
+  intros n d a s.
+  rewrite vec_0_neg.
+  rewrite sqvec_neg.
+  replace (INR (2 * d) / 2) with (INR d).
+  - rewrite sqvec_dist.
+    apply dot_mult_dist_r.
+  - rewrite mult_INR.
+    simpl. lra.
 Qed.
 
-Lemma dot_vec_noneg:
-  forall (n: nat) (a x y: vec n),
-  is_vec_leq 0 a ->
-  is_vec_leq x y -> dot a x <= dot a y
+Lemma red_13:
+  forall {n: nat} (a s: vec n),
+  dot a (sqvec (0 - - (dot s 1 / 2 * 1))) = (dot s 1%Vec / 2 * (dot s 1%Vec / 2) * dot a 1%Vec)%R
 .
 Proof.
-  induction n; intros.
-    - rewrite (eta0 _). simpl. lra.
-    - inv H.
-      inv H0.
-      app_inj_nat H3.
-      app_inj_nat H2.
-      app_inj_nat H7.
-      app_inj_nat H4.
-      subst.
-      rewrite !dot_step. simpl.
-      specialize (IHn _ _ _ H6 H9).
-      apply (Rmult_le_compat_l _ _ _ H5) in H8.
-      lra.
+  intros n a s.
+  rewrite vec_0_neg.
+  rewrite 2 sqvec_neg.
+  rewrite sqvec_dist.
+  rewrite dot_mult_dist_r.
+  rewrite sqvec_1.
+  reflexivity.
 Qed.
 
-Lemma dot_vec_noneg_0: forall (n: nat) (x y: vec n),
-  is_vec_leq 0 x -> is_vec_leq 0 y ->
-  0 <= dot x y.
-Proof.
-  induction n; intros.
-    - rewrite (eta0 x). simpl. lra.
-    - inv H. inv H0.
-      app_inj_nat H8.
-      app_inj_nat H7.
-      app_inj_nat H4.
-      app_inj_nat H3.
-      subst. rewrite dot_step. simpl.
-      specialize (IHn _ _ H6 H10).
-      assert (A:= Rmult_le_pos _ _ H5 H9).
-      lra.
-Qed.
-
-Lemma sqrtvec_dist:
-  forall (n: nat) (c: R) (v: vec n),
-    (0 <= c) -> (is_vec_leq 0 v) ->
-    sqrtvec (c * v) = (sqrt c) * sqrtvec v
+Theorem red_instance_correct_left :
+  forall {d : nat} (a s : vec (2 * d)),
+    perf_square_vec s ->
+    c_separated_valid
+      (dot s 1 / 2) d a (red_instance s)
+    ->
+    is_ec_partition a s
 .
 Proof.
-  induction n; intros.
-    - rewrite (eta0). apply eta0.
-    - rewrite (eta v). cbn.
-      specialize (IHn c (tl v)).
-      unfold sqrtvec in IHn.
-      unfold multvec in IHn.
-      rewrite (IHn H).
-      f_equal.
-      inv H0.
-      --
-      app_inj_nat H3.
-      app_inj_nat H4.
-      subst. simpl.
-      apply (sqrt_mult _ _ H H5).
-      -- inv H0.
-         app_inj_nat H3.
-         app_inj_nat H4.
-         subst. auto.
-Qed.
+  intros d a s Hsqrt Hvalid.
+  unfold c_separated_valid in Hvalid.
+  destruct Hvalid as [Ha [Hcard Hsep]].
 
-Lemma sq_sqrt_vec: forall (n: nat) (u: vec n),
-  is_vec_leq 0 u ->
-  sqvec (sqrtvec u) = u
-.
-Proof.
-  induction n; intros.
-    - rewrite eta0. apply eta0.
-    - inv H.
-      app_inj_nat H2.
-      app_inj_nat H3.
-      subst. cbn.
-      specialize (IHn y H5).
-      unfold sqvec, sqrtvec in IHn.
-      rewrite IHn.
-      f_equal. apply sqrt_def. apply H4.
-Qed.
+  unfold red_instance, red_g1, red_g2, red_g3 in Hsep.
+  simpl in Hsep.
 
-Definition partition_to_gaussians {n: nat} (m: nat) (s: vec n) : Vector.t (@gaussian n) 3 :=
-[
-  (0,zipvecs Rmin ((2*(INR m))*s) 1) ;
-  (sqrt (2*(INR m)/dot s 1) * (sqrtvec s), 1) ;
-  (- ((sqrt (dot s 1)) * 1), (2*(INR m)) * s)
-].
+  destruct Hsep as [Hfrom1 _].
+  simpl in Hfrom1.
 
-Theorem cm_separated_NP_completness_left:
-  forall (n: nat) (s: vec n),
-  is_positive s ->
-  (exists a m, (0 < m)%nat /\
-    c_separated_valid (1%R) m a (partition_to_gaussians m s))
-  -> exists a, is_partition a s
-.
-Proof.
-  unfold c_separated_valid, is_partition.
-  simpl.
-  intros n s P [a [m [M [A [B [[_ [E [_ [G _]]]] [[_ [_ _]] _]]]]]]].
-  exists a.
-  apply (conj A).
-  rewrite vec_0_neg in E.
-  rewrite vec_sub_neg in G.
-  rewrite (vec_plus_comm 0 _) in G. 
-  rewrite vec_plus_0 in G.
-  rewrite Rmult_1_l in E, G.
-  rewrite sqvec_dist in G.
-  assert (B2: forall (n: nat) (f: vec (S n)), is_positive f -> 0 < dot f 1). 
-  { intros. inv H.
-    app_inj_nat H1.
-    subst. rewrite dot_step. simpl.
-    apply pos_leq in H3.
-    assert (B3: forall n, is_vec_leq 0 (1: vec n)).
-    { induction n1. - constructor. - constructor; auto. lra. }
-    assert (B4:= dot_vec_noneg_0 _ _ _ H3 (B3 _)).
-    lra.
+  (* From pair (1,2), using the second variance inequality. *)
+  destruct Hfrom1 as [_ [H12 [_ [H13 _]]]].
+  replace (INR (d + (d + 0))%nat) with (INR (2 * d)%nat) in H12, H13 by (f_equal; lia).
+  rewrite red_12 in H12.
+  rewrite red_13 in H13.
+  replace (INR (2 * d) / 2) with (INR d) in H12, H13.
+  2:{ rewrite mult_INR. simpl. lra. }
+  rewrite dot_mult_dist_r in H12, H13.
+  destruct (Nat.eq_dec d 0).
+  { subst. simpl in a, s. rewrite (nil_spec a), (nil_spec s). split; [constructor|]. split; simpl; lra. }
+  assert (Nd : 0 < INR d).
+  { rewrite <- INR_0. apply lt_INR. lia. }
+
+  assert (Hlower : dot s 1 / 2 <= dot a s).
+  {
+    rewrite sq_sqrt_vec in H12 by (auto using perf_square_non_neg).
+    apply (Rmult_le_reg_l (INR d) _ _ Nd).
+    rewrite <- Hcard at 1.
+    rewrite (Rmult_comm (dot a 1)).
+    apply (Rmult_le_reg_l (INR d) _ _ Nd).
+    rewrite <- 2 Rmult_assoc.
+    rewrite (Rmult_comm _ (dot _ _ / 2)).
+    rewrite (Rmult_assoc (dot _ _ / 2)). apply H12.
   }
-  destruct n.
-  - rewrite (eta0 s). simpl. rewrite (eta0 a). simpl. lra.
-  -
-  specialize (B2 _ s P).
-  assert (A2: 0 <= dot s 1) by lra.
-  rewrite (sqrt_def _ A2) in G.
-  rewrite sqvec_1 in G.
-  rewrite 2dot_mult_dist_r in G.
-  rewrite B in G.
-  rewrite sqvec_neg in E.
-  rewrite sqvec_dist in E.
-  rewrite (sq_sqrt_vec _ _ (pos_leq _ _ P)) in E.
-  assert (A3:= Rinv_0_lt_compat _ (B2)).
-  apply (Rmult_lt_compat_l _ _ _ (lt_INR _ _ M)) in A3.
-  rewrite Rmult_0_r in A3.
-  assert (Dum: 0 < 2) by lra.
-  apply (Rmult_lt_compat_l _ _ _ Dum) in A3.
-  rewrite Rmult_0_r in A3.
-  replace ((2 * ((INR m) * / dot s 1%Vec))%R) with (2 * (INR m) / dot s 1) in A3 by lra.
-  rewrite (sqrt_def _ (Rlt_le _ _ A3)) in E.
-  rewrite B in E.
-  rewrite dot_mult_dist_r in E.
-  replace (2 * (INR m) * dot a s)%R with (2 * dot a s * (INR m))%R in G by lra.
-  apply (Rmult_le_reg_r _ _ _ (lt_INR _ _ M)) in G.
-  rewrite <- (Rmult_1_l (INR m)) in E at 1.
-  replace (2 * (INR m) / dot s (1%Vec) * dot a s)%R with (2 * / dot s 1%Vec * dot a s * (INR m))%R in E by lra.
-  apply (Rmult_le_reg_r _ _ _ (lt_INR _ _ M)) in E.
-  clear A3 Dum.
-  apply (Rmult_le_compat_r _ _ _ A2) in E.
-  rewrite Rmult_1_l in E.
-  replace (2 * / dot s (1%Vec) * dot a s * dot s (1%Vec))%R with (2 * (dot a s * dot s (1%Vec) * / dot s (1%Vec)))%R in E by lra.
-  assert (C2: (dot s 1%Vec <> 0)%R) by lra.
-  rewrite (Rmult_inv_r_id_l _ _ C2) in E.
-  assert (C3: (2 * dot a s = dot s (1%Vec))%R) by lra.
-  rewrite <- C3.
-  lra.
+
+  assert (Hupper : dot a s <= dot s 1 / 2).
+  {
+    destruct (Req_dec (dot s 1) 0).
+    + apply (non_neg_dot_0 _ (perf_square_non_neg _ Hsqrt)) in H.
+      subst. rewrite (dot_comm _ 0).
+      rewrite 2 dot_0. lra.
+    + assert (B:= non_neg_dot_1 _ (perf_square_non_neg _ Hsqrt)).
+      assert (B2: 0 < dot s 1 / 2) by lra.
+      apply (Rmult_le_reg_l (INR d) _ _ Nd).
+      rewrite <- Hcard at 2.
+      rewrite (Rmult_comm (dot a 1)).
+      apply (Rmult_le_reg_l (dot s 1 / 2) _ _ B2).
+      rewrite <- (Rmult_assoc _ _ (dot a 1)). apply H13.
+  }
+
+  unfold is_ec_partition.
+  constructor; auto.
+  constructor.
+  + rewrite mult_INR. simpl INR. lra.
+  + lra.
 Qed.
 
-Fixpoint is_binary_to_nat_sum {n: nat} (l: vec n): nat.
-destruct l.
-  - apply O.
-  - destruct (Req_dec_T 1 h).
-    -- apply (S (is_binary_to_nat_sum _ l)).
-    -- apply (is_binary_to_nat_sum _ l).
-Defined.
-
-Lemma pos_and_bin_dot:
-  forall (n: nat) (a l: vec n),
-  is_binary a -> is_positive l ->
-  0 < dot a l -> (0 < is_binary_to_nat_sum a)%nat
-.
+Lemma red_23 :
+  forall {m} (a b c: vec m),
+    is_binary a ->
+    is_vec_leq 0 b ->
+    is_vec_leq 0 c ->
+      dot a (sqvec b) <= dot a (sqvec (b + c))
+.    
 Proof.
-  induction n; intros.
-    - rewrite (eta0 a) in H1.
-      simpl in H1. lra.
-    - inv H; app_inj_nat H3;
-      inv H0; app_inj_nat H3;
-      rewrite dot_step in H1; simpl in H1;
-      destruct H4; subst.
-      + rewrite Rmult_0_l in H1.
-        rewrite Rplus_0_l in H1.
-        specialize (IHn _ _ H5 H7 H1).
-        simpl. destruct Req_dec_T; auto.
-      + simpl. destruct Req_dec_T.
-        * lia.
-        * lra.
-Qed. 
-
-Lemma pos_dot_1: forall (n: nat) (p: vec (S n)),
-  is_positive p -> 0 < dot p 1
-.
-Proof.
-  induction n; intros.
-    - inv H. app_inj_nat H1.
-      rewrite dot_step, (eta0 v). simpl. lra.
-    - inv H. app_inj_nat H1.
-      specialize (IHn _ H3).
-      rewrite dot_step.
-      simpl. rewrite Rmult_1_r.
-      rewrite <- (Rplus_0_l 0).
-      apply Rplus_lt_compat; auto.
+  induction m; intros a b c Ha Hb Hc.
+  - rewrite (eta0 a), (eta0 b), (eta0 c).
+    simpl. lra.
+  - rewrite (eta a), (eta b), (eta c) in *.
+    inversion Ha as [| ? ? ? Ha_hd Ha_tl]; subst; clear Ha.
+    inversion Hb as [| ? ? ? ? ? Hb_hd Hb_tl]; subst; clear Hb.
+    inversion Hc as [| ? ? ? ? ? Hc_hd Hc_tl]; subst; clear Hc.
+    repeat match goal with
+    | H : existT _ _ _ = existT _ _ _ |- _ =>
+        apply (inj_pair2_eq_dec _ Nat.eq_dec) in H; subst; clear H
+    end.
+    rewrite !dot_step.
+    simpl.
+    specialize (IHm _ _ _ Ha_tl Hb_tl Hc_tl).
+    destruct Ha_hd as [Ha | Ha]; subst; rewrite Ha; unfold sqvec in IHm.
+    + rewrite 2 Rmult_0_l. rewrite 2 Rplus_0_l. apply IHm.
+    + rewrite 2 Rmult_1_l. apply Rplus_le_compat; auto.
+      nra.
 Qed.
 
-Lemma bin_sum_dot_1: forall (n: nat) (a: vec n),
-  is_binary a ->
-  INR (is_binary_to_nat_sum a) = dot a 1
+Theorem red_instance_correct_right :
+  forall {d : nat} (a s : vec (2 * d)),
+    perf_square_vec s ->
+    is_ec_partition a s ->
+    c_separated_valid (dot s 1 / 2) d a (red_instance s)
 .
 Proof.
-  induction a; intros.
-    - auto.
-    - simpl.
-      inv H; app_inj_nat H2;
-      cbn; destruct (Req_dec_T), H3; subst.
-      + lra.
-      + rewrite S_INR. rewrite (IHa H4). lra.
-      + rewrite Rmult_0_l, Rplus_0_l. apply IHa.
-        apply H4.
-      + contradiction.
-Qed.
-
-Lemma is_bin_is_pos_dot_leq : forall (n: nat) (a b: vec n),
-  is_binary a -> is_positive b ->
-    dot a b <= dot b 1
-.
-Proof.
-  induction n; intros.
-    - rewrite (eta0 a), (eta0 b). simpl. lra.
-    - inv H; app_inj_nat H2;
-      inv H0; app_inj_nat H2.
-      destruct H3; subst;
-      specialize (IHn _ _ H4 H6);
-      rewrite dot_step; cbn; lra.
-Qed.
-
-Lemma zipvec_pos_min_leq: forall (n: nat) (u v w: vec n),
-  is_vec_leq 0 u ->
-  dot u (zipvecs Rmin v w) <= dot u w
-.
-Proof.
-  induction n; intros.
-    - rewrite (eta0 (zipvecs _ _ _)), (eta0 u).
-      simpl. lra.
-    - rewrite (eta u), (eta v), (eta w).
-      rewrite 2(dot_step (hd _ :: _) _).
-      inv H. app_inj_nat H2. app_inj_nat H3.
-      simpl hd. simpl tl.
-      specialize (IHn y (tl v) (tl w) H5).
-      assert (A:= Rmin_r (hd v) (hd w)).
-      apply (Rmult_le_compat_l _ _ _ H4) in A.
+  intros d a s P [B [D Sm]].
+  split; auto.
+  rewrite mult_INR in D. simpl in D.
+  replace ((1+1) * INR d / 2) with (INR d) in D by lra.
+  split.
+    - apply D.
+    - split.
+    -- split.
+    { rewrite red_12.
+      rewrite (sq_sqrt_vec _ _ (perf_square_non_neg _ P)).
+      rewrite Sm. rewrite Rmult_comm. apply Rmult_le_compat_r.
+      - apply Rle_mult_inv_pos; [|lra].
+        apply non_neg_dot_1.
+        apply perf_square_non_neg; auto.
+      - replace (dot a 1) with (INR d).
+        rewrite <- mult_INR. apply le_INR.
+        destruct (Nat.eq_dec d 0).
+        { subst. lia. }
+        apply Nat.le_mul_r. lia.
+    }
+    split.
+    { rewrite red_12.
+      rewrite (sq_sqrt_vec _ _ (perf_square_non_neg _ P)).
+      replace (INR (2 * d) / 2) with (INR d).
+      2:{ rewrite mult_INR. simpl. lra. }
+      rewrite dot_mult_dist_r.
+      rewrite Sm.
+      replace (dot a 1) with (INR d). lra.
+    }
+    split.
+    { rewrite red_13.
+      replace (dot a 1) with (INR d).
+      apply (Rmult_le_compat_r _ _ _ (pos_INR _)).
+      assert (F: forall m (u v: vec m), is_binary u -> perf_square_vec v -> exists q, dot u v = INR q).
+      { induction m; intros u v Bi Pe.
+        + exists O. rewrite (nil_spec u). trivial.
+        + rewrite (eta u) in Bi. rewrite (eta v) in Pe.
+          inv (Bi, Pe). 
+          destruct (IHm _ _ H3 H1).
+          destruct H2.
+          ++ exists (x0)%nat.
+             rewrite dot_step.
+             rewrite H, H2, <- H0. lra.
+          ++ exists (x*x + x0)%nat.
+             rewrite dot_step.
+             rewrite H, H2, <- H0.
+              rewrite <- mult_INR. rewrite plus_INR. lra.
+      }
+      destruct (F _ _ _ B P).
+      destruct x.
+      + simpl in H. replace (dot a s) with 0%R in Sm.
+        rewrite <- Sm. lra.
+      + assert (Sn: 1 <= dot s 1 / 2).
+        { replace (dot a s) with (1 + INR x)%R in Sm.
+          2:{ rewrite S_INR in H. lra. }
+          assert (G:= pos_INR x). lra.
+        } rewrite <- Rmult_1_l at 1. apply Rmult_le_compat_r; lra.
+    }
+    split; [|exact I].
+    rewrite red_13.
+    replace (INR (2*d) / 2) with (INR d).
+    2:{ rewrite mult_INR. simpl. lra. }
+    rewrite dot_mult_dist_r.
+    rewrite <- D.
+    rewrite Sm.
+    rewrite (Rmult_comm (dot a 1)).
+    lra.
+    --
+    split; [|auto].
+    split.
+    {
+      replace (INR (2 * d) / 2) with (INR d).
+      2:{ rewrite mult_INR. simpl. lra. }
+      rewrite vec_sub_neg.
+      eapply Rle_trans.
+      2:{
+        apply red_23; auto.
+        - apply vec_sqrt_nonneg.
+          + apply pos_INR.
+          + apply perf_square_non_neg. exact P.
+        - apply vec_nonneg_mult_1.
+          apply Rle_mult_inv_pos; [|lra].
+          apply non_neg_dot_1.
+          apply perf_square_non_neg. exact P.
+      }
+      rewrite sqvec_dist.
+      rewrite !dot_mult_dist_r.
+      rewrite (sq_sqrt_vec _ _ (perf_square_non_neg _ P)).
+      rewrite Sm.
+      replace (dot a 1) with (INR d).
       lra.
-Qed.
-
-Lemma bin_is_vec_leq: forall (n: nat) (a: vec n),
-  is_binary a -> is_vec_leq 0 a
-.
-Proof.
-  induction a.
-    - constructor.
-    - intros.
-      inv H. app_inj_nat H2.
-      constructor; auto; lra.
-Qed.
-
-Lemma zipvecs_min_comm: forall (n: nat) (u v: vec n),
-  zipvecs Rmin u v = zipvecs Rmin v u
-.
-Proof.
-  induction n; intros.
-    - rewrite eta0. apply eta0.
-    - rewrite (eta u), (eta v).
-      cbn.
-      rewrite IHn.
-      f_equal.
-      apply Rmin_comm.
-Qed.
-
-
-Lemma sqvec_plus_leq: forall {n: nat} (a u v: vec n),
-  is_vec_leq 0 a ->
-  is_vec_leq 0 u ->
-  is_vec_leq 0 v ->
-  dot a (sqvec u) <= dot a (sqvec (u + v)) 
-.
-Proof.
-  induction n; intros.
-    - rewrite (eta0 a). simpl. lra.
-    - inv H. inv H0. inv H1.
-      app_inj_nat H4.
-      app_inj_nat H5.
-      app_inj_nat H13.
-      app_inj_nat H12.
-      app_inj_nat H8.
-      app_inj_nat H9.
-      specialize (IHn _ _ _ H7 H11 H15).
-      assert (E:= Rle_0_sqr b0).
-      rewrite Rsqr_def in E.
-      assert (F: (b0 <= b0 + b1)%R) by lra.
-      assert (E2:= Rle_0_sqr (b0 + b1)).
-      rewrite Rsqr_def in E2.
-      apply (Rmult_le_compat_l _ _ _ H6) in E, E2.
-      rewrite Rmult_0_r in E, E2.
-      assert (F2:= Rmult_le_compat _ _ _ _ H10 H10 F F).
-      apply (Rmult_le_compat_l _ _ _ H6) in F2.
-      cbn.
-      unfold sqvec, plusvecs in IHn.
+    }
+    {
+      replace (INR (2 * d) / 2) with (INR d).
+      2:{ rewrite mult_INR. simpl. lra. }
+      rewrite vec_sub_neg.
+      rewrite dot_mult_dist_r.
+      rewrite Sm. simpl.
+      split; [|trivial].
+      eapply Rle_trans.
+      2:{
+        rewrite vec_plus_comm.
+        apply red_23; auto.
+        - apply vec_nonneg_mult_1.
+          apply Rle_mult_inv_pos; [|lra].
+          apply non_neg_dot_1.
+          apply perf_square_non_neg. exact P.
+        - apply vec_sqrt_nonneg.
+          + apply pos_INR.
+          + apply perf_square_non_neg. exact P.
+      }
+      rewrite sqvec_dist.
+      rewrite dot_mult_dist_r.
+      rewrite sqvec_1.
+      rewrite D.
       lra.
+    }
+    split; exact I.
 Qed.
 
-Lemma is_vec_leq_1: forall (n: nat),
-  @is_vec_leq n 0 1
+
+Definition hinge (c D S : R) : R :=
+  Rmax 0%R (c - D / S)
 .
+
+Fixpoint sumR (xs : list R) : R :=
+  match xs with
+  | List.nil => 0
+  | List.cons x xs => x + sumR xs
+  end.
+
+Definition gaussian_pair_stats {d : nat}
+  (a : vec d) (p : @gaussian d * @gaussian d) : R * R :=
+  let (g1, g2) := p in
+  let (mu1, sig1) := g1 in
+  let (mu2, sig2) := g2 in
+    (dot a (sqvec (mu1 - mu2)),
+     Rmax (dot a sig1) (dot a sig2)).
+
+Definition gaussian_pair_hinge {d : nat}
+  (c : R) (a : vec d) (g1 g2 : @gaussian d) : R :=
+  let (D, S) := gaussian_pair_stats a (g1, g2) in
+    hinge c D S.
+
+Fixpoint hinge_against {d : nat}
+  (c : R) (a : vec d) (g : @gaussian d) (L : list (@gaussian d)) : R :=
+  match L with
+  | List.nil => 0
+  | List.cons h L' => gaussian_pair_hinge c a g h + hinge_against c a g L'
+  end.
+
+Fixpoint hinge_form {d : nat}
+  (c : R) (a : vec d) (L : list (@gaussian d)) : R :=
+  match L with
+  | List.nil => 0
+  | List.cons g L' => hinge_against c a g L' + hinge_form c a L'
+  end.
+
+Lemma gaussian_pair_stats_ordered :
+  forall {d : nat} (a mu1 sig1 mu2 sig2 : vec d),
+    is_vec_leq 0 a ->
+    is_vec_leq sig1 sig2 ->
+    gaussian_pair_stats a ((mu1, sig1), (mu2, sig2)) =
+      (dot a (sqvec (mu1 - mu2)), dot a sig2).
 Proof.
-  induction n; constructor.
-  - lra.
-  - apply IHn.
+  intros d a mu1 sig1 mu2 sig2 Ha Hsig.
+  unfold gaussian_pair_stats.
+  rewrite Rmax_right.
+  - reflexivity.
+  - apply dot_vec_noneg; assumption.
 Qed.
 
-Lemma L3: forall (n: nat) (a: R) (s: vec n),
-  is_positive s ->
-  0 <= a ->
-  @is_vec_leq n 0 (sqrt (a + dot s 1) * 1)
-.
-Proof.
-  induction n; intros.
-  - constructor.
-  - inv H. app_inj_nat H2.
-    rewrite dot_step.
-    simpl hd. simpl tl. rewrite Rmult_1_r.
-    assert (A:= dot_vec_noneg_0 n v 1 (pos_leq _ v H4) (is_vec_leq_1 n)).
-    assert (A2: 0 <= x + dot v 1) by lra.
-    rewrite vec_mult_step.
-    simpl hd. simpl tl.
-    cbn.
-    apply vclq_con.
-  + rewrite Rmult_1_r. apply sqrt_positivity. lra.
-  + rewrite <- Rplus_assoc. apply IHn; auto.
-    lra.
-Qed. 
+(* Recursive binary-well Gaussian schedule.  The class at index [i] has
+   mean [m^i * 1].  For [i = 0] its covariance is [1]; for later indices
+   it accumulates the pairwise separation scales against the earlier
+   classes, all pointed at coordinate [i]. *)
+Fixpoint gaussian_schedule_sigma_sum {d : nat}
+  (m : R) (i k : nat) : vec d :=
+  match k with
+  | O => 0
+  | S k' =>
+      gaussian_schedule_sigma_sum m i k' +
+      (((m ^ i - m ^ k') * (m ^ i - m ^ k'))%R *
+       (m * canon_e i + 1))%Vec
+  end.
 
-Lemma L4: forall (n: nat) (a: R) (b: vec n),
-  0 <= a -> is_vec_leq 0 b ->
-  is_vec_leq 0 (a * b)
-.
-Proof.
-  induction n; intros.
-    - rewrite eta0. constructor.
-    - inv H0. app_inj_nat H3. app_inj_nat H4.
-      simpl. cbn. apply vclq_con.
-    + apply (Rmult_le_compat_l _ _ _ H) in H5. lra.
-    + apply IHn; auto.
-Qed.
+Definition gaussian_schedule_mu {d : nat} (m : R) (i : nat) : vec d :=
+  (m ^ i)%R * 1.
 
-Lemma L5: forall (n: nat) (b: vec n),
-  is_vec_leq 0 b -> is_vec_leq 0 (sqrtvec b)
-.
-Proof.
-  induction b.
-  - constructor.
-  - intros. inv H. app_inj_nat H2.
-    app_inj_nat H5.
-    cbn.
-    constructor.
-  + apply (sqrt_positivity _ H4).
-  + apply (IHb H6).
-Qed. 
+Definition gaussian_schedule_sigma {d : nat} (m : R) (i : nat) : vec d :=
+  match i with
+  | O => 1
+  | S _ => gaussian_schedule_sigma_sum m i i
+  end.
 
-Theorem cm_separated_NP_completness_right:
-  forall (n: nat) (s: vec (S n)),
-  is_positive s ->
-  (exists a, is_partition a s) ->
-  (exists a m, (0 < m)%nat /\
-    c_separated_valid (1%R) m a (partition_to_gaussians m s))
-.
-Proof.
-  unfold is_partition, c_separated_valid.
-  intros n s P [a [Ba Pa]].
-  exists a, (is_binary_to_nat_sum a).
-  assert (A:= pos_dot_1 _ _ P).
-  assert (B:=is_bin_is_pos_dot_leq _ _ _ Ba P).
-  assert (C: 0 < dot s 1 / 2).
-  { apply Rdiv_lt_0_compat; lra. }
-  assert (C2: 0 < dot a s) by lra.
-  assert (C3:= pos_and_bin_dot _ _ _ Ba P C2). 
-  apply (conj C3).
-  apply (conj Ba).
-  assert (C4:= (eq_sym (bin_sum_dot_1 _ _ Ba))).
-  apply (conj C4).
-  apply lt_INR in C3.
-  simpl (INR 0) in C3.
-  unfold partition_to_gaussians.
-  rewrite (bin_sum_dot_1 _ _ Ba).
-  assert (D: 0 < dot s 1) by lra.
-  unfold c_separates.
-  apply conj.
-  + apply conj.
-  * rewrite vec_0_neg.
-    rewrite sqvec_neg.
-    rewrite sqvec_dist.
-    rewrite (sq_sqrt_vec _ _ (pos_leq _ _ P)).
-    assert (E:= Rinv_0_lt_compat _ D).
-    assert (E2: 0 < dot a 1) by lra.
-    apply (Rmult_lt_compat_l _ _ _ E) in E2.
-    rewrite Rmult_0_r in E2.
-    assert (E3: 0 < 2 * dot a 1 / dot s 1) by lra.
-    rewrite (sqrt_def _ (Rlt_le _ _ E3)).
-    rewrite dot_mult_dist_r.
-    rewrite Pa.
-    rewrite 2Rdiv_def.
-    replace ((2 * dot a 1%Vec * / dot s 1%Vec * (dot s 1%Vec * / 2))%R) with ((2 * / 2 * dot s 1%Vec * / dot s 1%Vec * dot a 1%Vec)%R) by lra.
-    rewrite Rmult_inv_r by lra.
-    rewrite 2Rmult_1_l.
-    rewrite Rmult_inv_r by lra.
-    rewrite Rmult_1_l.
-    apply zipvec_pos_min_leq.
-    apply bin_is_vec_leq. auto.
-  * apply conj.
-  - rewrite Rmult_1_l.
-    rewrite vec_0_neg.
-    rewrite sqvec_neg.
-    rewrite sqvec_dist.
-    rewrite (sq_sqrt_vec _ _ (pos_leq _ _ P)).
-    assert (E:= Rinv_0_lt_compat _ D).
-    assert (E2: 0 < dot a 1) by lra.
-    apply (Rmult_lt_compat_l _ _ _ E) in E2.
-    rewrite Rmult_0_r in E2.
-    assert (E3: 0 < 2 * dot a 1 / dot s 1) by lra.
-    rewrite (sqrt_def _ (Rlt_le _ _ E3)).
-    rewrite dot_mult_dist_r.
-    rewrite Pa.
-    rewrite 2Rdiv_def.
-    replace ((2 * dot a 1%Vec * / dot s 1%Vec * (dot s 1%Vec * / 2))%R) with ((2 * / 2 * dot s 1%Vec * / dot s 1%Vec * dot a 1%Vec)%R) by lra.
-    rewrite Rmult_inv_r by lra.
-    rewrite Rmult_1_l.
-    rewrite Rmult_inv_r by lra.
-    rewrite Rmult_1_l.
-    lra.
-  - apply conj.
-  -- rewrite Rmult_1_l.
-     rewrite vec_sub_neg.
-     rewrite vec_plus_comm.
-     rewrite vec_plus_0.
-     rewrite sqvec_dist.
-     rewrite (sqrt_def _ (Rlt_le _ _ D)).
-     rewrite sqvec_1.
-     rewrite dot_mult_dist_r.
-     assert (E:= zipvec_pos_min_leq _ a 1 (2 * dot a 1 * s) (bin_is_vec_leq _ _ Ba)).
-     rewrite zipvecs_min_comm in E.
-     rewrite dot_mult_dist_r in E.
-     rewrite Pa in E. lra.
-  -- apply conj.
-  ++ rewrite Rmult_1_l.
-     rewrite vec_sub_neg.
-     rewrite vec_plus_comm.
-     rewrite vec_plus_0.
-     rewrite sqvec_dist.
-     rewrite (sqrt_def _ (Rlt_le _ _ D)).
-     rewrite sqvec_1.
-     rewrite 2dot_mult_dist_r.
-     rewrite Pa. lra.
-  ++ apply I.
-  + apply conj.
-  * apply conj.
-  -- rewrite Rmult_1_l.
-     rewrite vec_sub_neg.
-     rewrite vec_plus_comm.
-     assert (E2:= L3 _ 0 s P (or_intror (eq_refl 0%R))).
-     rewrite Rplus_0_l in E2.
-     assert (F4: 0 <= (2 * dot a 1 / dot s 1)).
-    { rewrite Rdiv_def. rewrite C4.
-      apply Rinv_0_lt_compat in D.
-      rewrite <- (Rmult_0_l 0).
-      apply Rmult_le_compat; lra. }
-    assert (F2:= sqrt_positivity _ F4).
-    assert (F3:= L5 _ _ (pos_leq _ _ P)).
-    apply (L4 _ _ _ F2) in F3.
-    assert (E:= sqvec_plus_leq _ _  _  (bin_is_vec_leq _ a Ba) F3 E2).
-    rewrite vec_plus_comm in E.
-    rewrite sqvec_dist in E.
-    rewrite (sq_sqrt_vec _ _ (pos_leq _ _ P)) in E.
-    rewrite (sqrt_def _ F4) in E.
-    rewrite dot_mult_dist_r in E.
-    rewrite Pa in E.
-    assert (G: (2 * dot a 1%Vec / dot s 1%Vec * (dot s 1%Vec / 2) = dot a 1%Vec)%R).
-    { rewrite 2Rdiv_def.
-      rewrite Rmult_assoc.
-      rewrite <- (Rmult_assoc _ _ (/ 2)).
-      rewrite Rmult_inv_l by lra.
-      lra. }
-    rewrite G in E.
-    apply E.
-  -- apply conj.
-  ++ rewrite Rmult_1_l.
-     rewrite vec_sub_neg.
-     assert (E2:= L3 _ 0 s P (or_intror (eq_refl 0%R))).
-     rewrite Rplus_0_l in E2.
-     assert (F4: 0 <= (2 * dot a 1 / dot s 1)).
-    { rewrite Rdiv_def. rewrite C4.
-      apply Rinv_0_lt_compat in D.
-      rewrite <- (Rmult_0_l 0).
-      apply Rmult_le_compat; lra. }
-    assert (F2:= sqrt_positivity _ F4).
-    assert (F3:= L5 _ _ (pos_leq _ _ P)).
-    apply (L4 _ _ _ F2) in F3.
-    assert (E:= sqvec_plus_leq _ _  _  (bin_is_vec_leq _ a Ba) E2 F3).
-    rewrite sqvec_dist in E.
-    rewrite sqvec_1 in E.
-    rewrite (sqrt_def _ (Rlt_le _ _ D)) in E.
-    rewrite dot_mult_dist_r in E.
-    rewrite dot_mult_dist_r.
-    rewrite Pa.
-    assert (G: (2 * dot a 1%Vec * (dot s 1%Vec / 2) = dot a 1%Vec * dot s 1%Vec)%R).
-    { lra. }
-    rewrite G.
-    rewrite vec_plus_comm.
-    lra.
-  ++ apply I.
-  * apply conj.
-  -- apply I.
-  -- apply I.
-Qed.
+Definition gaussian_schedule_class {d : nat} (m : R) (i : nat)
+  : @gaussian d :=
+  (gaussian_schedule_mu m i, gaussian_schedule_sigma m i).
 
-Lemma is_bin_sum_bound: forall (n: nat) (a: vec n),
-  (is_binary_to_nat_sum a <= n)%nat
-.
-Proof.
-  induction a.
-  - constructor.
-  - simpl.
-    destruct (Req_dec_T); lia.
-Qed.
+Fixpoint gaussian_schedule_from {d : nat} (m : R) (start n : nat)
+  : Vector.t (@gaussian d) n :=
+  match n with
+  | O => []
+  | S n' =>
+      gaussian_schedule_class m start ::
+      gaussian_schedule_from m (S start) n'
+  end.
 
-Lemma is_positive_1: forall (n: nat),
-  @is_positive n 1
-.
-Proof.
-  induction n.
-  - constructor.
-  - simpl. constructor.
-    -- lra.
-    -- apply IHn.
-Qed.
+Definition gaussian_schedule {d : nat} (m : R) (n : nat)
+  : Vector.t (@gaussian d) n :=
+  gaussian_schedule_from m O n.
 
-Lemma dot_1_1: forall (n: nat),
-  @dot n 1 1 = INR n
-.
-Proof.
-  induction n.
-  - simpl. apply eq_refl.
-  - rewrite dot_step, S_INR. simpl. lra.
-Qed.
-
-Theorem c_separation_NP_complete:
-  forall (n: nat) (s: vec (S n)),
-    is_positive s ->
-    (exists a, is_partition a s) <->
-    (exists a m, (O < m <= (S n))%nat /\
-    c_separated_valid (1%R) m a (partition_to_gaussians m s))
-.
-Proof.
-  intros. constructor.
-  - intros P.
-    destruct (cm_separated_NP_completness_right _ _ H P) as [a [m [L D]]].
-    exists a, m.
-    constructor; auto.
-    constructor; auto.
-    destruct D as [B [E F]].
-    assert (J:= is_bin_is_pos_dot_leq _ _ _ B (is_positive_1 _)).
-    rewrite dot_1_1 in J.
-    rewrite E in J.
-    apply (INR_le _ _ J).
-  - intros [a [m [L G]]].
-    apply cm_separated_NP_completness_left; auto.
-    exists a, m.
-    constructor; auto.
-    lia.
-Qed.
-
-(** assume c = 1 from now on **)
-Definition separation {n: nat} (a: vec n)
-  (g1 g2: gaussian) : R :=
-  let (mu1, sigm1) := g1 in
-  let (mu2, sigm2) := g2 in
-    dot a ((sqvec (mu1 - mu2))) /
-    Rmax (dot a sigm1) (dot a sigm2)
-.
-
-Definition missing_separation {n: nat} (a: vec n)
-  (g1 g2: gaussian) : R :=
-  Rmax 0 (1 - separation a g1 g2)
-.
-
-Lemma Rmax_le_l: forall a b c,
-  Rmax a b <= c -> a <= c
-.
-Proof.
-  intros a b c A.
-  unfold Rmax in A.
-  destruct (Rle_dec a b); lra.
-Qed.
-
-Lemma Rmax_le_r: forall a b c,
-  Rmax a b <= c -> b <= c
-.
-Proof.
-  intros a b c A.
-  unfold Rmax in A.
-  destruct (Rle_dec a b); lra.
-Qed.
-
-Theorem beta_to_separated :
-  forall (n: nat) (a: vec n) (g1 g2: gaussian) (b: R),
-  let (_, sig1) := g1 in
-  let (_, sig2) := g2 in
-  0 < dot a sig1 \/ 0 < dot a sig2 -> 
-  (missing_separation a g1 g2 <= b <-> c_separates (1 - b) a [g1 ; g2])
-.
-Proof.
-  intros n a [mu1 sig1] [mu2 sig2] b N.
-  split; intros A.
-  - unfold missing_separation in A.
-    unfold separation in A.
-    assert (Al:= Rmax_le_l _ _ _ A).
-    assert (Ar:= Rmax_le_r _ _ _ A).
-    assert (0 < Rmax (dot a sig1) (dot a sig2)).
-    { destruct N;
-      unfold Rmax; destruct Rle_dec; lra. }
-    assert (Br: (1 - b) * Rmax (dot a sig1) (dot a sig2) <= dot a (sqvec (mu1 - mu2))).
-    { apply (Rmult_le_reg_r _ _ _ (Rinv_0_lt_compat _ H)).
-      field_simplify; lra. }
-    rewrite Rmax_dist_mult_l in Br.
-    
-    Search (c_separates).
-    split; split.
-    Search (_ * Rmax _ _)%R.
-    Search (_ * Rmax _ _)%R.
-  
 
 Close Scope vec_scope.
 Close Scope R_scope.

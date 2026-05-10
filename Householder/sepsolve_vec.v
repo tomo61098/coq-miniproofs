@@ -15,6 +15,26 @@ Theorem eta0 {A}: forall x: t A O, x = [].
 Proof. apply case0. auto. Qed.
 
 
+Ltac inv_cleanup :=
+  repeat match goal with
+  | H : existT _ _ _ = existT _ _ _ |- _ =>
+      apply (inj_pair2_eq_dec _ Nat.eq_dec) in H; subst; clear H
+  end.
+
+Ltac inv_many Hs :=
+  lazymatch Hs with
+  | (?H, ?Hs') =>
+      inversion H; subst; clear H;
+      inv_cleanup;
+      inv_many Hs'
+  | ?H =>
+      inversion H; subst; clear H;
+      inv_cleanup
+  end.
+
+Tactic Notation "inv" constr(Hs) :=
+  inv_many Hs.
+
 Lemma hd_app: forall {T n k}
   (A: t T (S n))
   (B: t T k),
@@ -442,6 +462,179 @@ Proof.
       f_equal. lra.
 Qed.
 
+
+Definition is_binary {n: nat} (u: vec n) :=
+  Forall (fun x: R => x = 0 \/ x = 1)%R u
+.
+
+
+Definition is_positive {n: nat} (u: vec n) :=
+  Forall (fun x => 0 < x)%R u
+.
+
+
+Inductive is_vec_leq : forall {n: nat}, vec n -> vec n -> Prop :=
+  | vclq_nil : is_vec_leq [] []
+  | vclq_con : forall (n: nat) (a b: R) (x y: vec n),
+    a <= b -> is_vec_leq x y -> is_vec_leq (a::x) (b::y)
+.
+
+Lemma pos_leq: forall (n: nat) (x: vec n),
+  is_positive x -> is_vec_leq 0 x.
+Proof.
+  induction x.
+    - constructor.
+    - intros. inv H.
+      constructor; auto. lra.
+Qed.
+
+Lemma dot_vec_noneg:
+  forall (n: nat) (a x y: vec n),
+  is_vec_leq 0 a ->
+  is_vec_leq x y -> dot a x <= dot a y
+.
+Proof.
+  induction n; intros.
+    - rewrite (eta0 _). simpl. lra.
+    - inv (H, H0).
+      rewrite !dot_step. simpl.
+      specialize (IHn _ _ _ H6 H4).
+      apply (Rmult_le_compat_l _ _ _ H5) in H3.
+      lra.
+Qed.
+
+Lemma dot_vec_noneg_0: forall (n: nat) (x y: vec n),
+  is_vec_leq 0 x -> is_vec_leq 0 y ->
+  0 <= dot x y.
+Proof.
+  induction n; intros.
+    - rewrite (eta0 x). simpl. lra.
+    - inv (H, H0).
+      subst. rewrite dot_step. simpl.
+      specialize (IHn _ _ H6 H7).
+      assert (A:= Rmult_le_pos _ _ H5 H4).
+      lra.
+Qed.
+
+Lemma sqrtvec_dist:
+  forall (n: nat) (c: R) (v: vec n),
+    (0 <= c) -> (is_vec_leq 0 v) ->
+    sqrtvec (c * v) = (sqrt c) * sqrtvec v
+.
+Proof.
+  induction n; intros.
+    - rewrite (eta0). apply eta0.
+    - rewrite (eta v). cbn.
+      specialize (IHn c (tl v)).
+      unfold sqrtvec in IHn.
+      unfold multvec in IHn.
+      rewrite (IHn H).
+      f_equal.
+      inv H0.
+      --
+      subst. simpl.
+      apply (sqrt_mult _ _ H H5).
+      -- inv H0.
+         subst. auto.
+Qed.
+
+Lemma sq_sqrt_vec: forall (n: nat) (u: vec n),
+  is_vec_leq 0 u ->
+  sqvec (sqrtvec u) = u
+.
+Proof.
+  induction n; intros.
+    - rewrite eta0. apply eta0.
+    - inv H.
+      subst. cbn.
+      specialize (IHn y H5).
+      unfold sqvec, sqrtvec in IHn.
+      rewrite IHn.
+      f_equal. apply sqrt_def. apply H4.
+Qed.
+
+Lemma non_neg_dot_1:
+  forall {n: nat} (u: vec n),
+  is_vec_leq 0 u ->
+  0%R <= dot u 1
+.
+Proof.
+  induction u.
+  - simpl. lra.
+  - intros.
+    inv H.
+    rewrite dot_step. simpl.
+    apply Rplus_le_le_0_compat.
+    + lra.
+    + apply (IHu H6).
+Qed.
+
+Lemma non_neg_dot_0:
+  forall {n: nat} (u: vec n),
+  is_vec_leq 0 u ->
+  dot u 1 = 0%R ->
+  u = 0
+.
+Proof.
+  induction u.
+  + trivial.
+  + rewrite dot_step. simpl.
+    intros L D.
+    inv L.
+    specialize (IHu H5).
+    apply non_neg_dot_1 in H5.
+    f_equal.
+    -- lra.
+    -- apply IHu. lra.
+Qed.
+
+
+Inductive perf_square_vec : forall {n}, vec n -> Prop :=
+  | perf_square_nil : perf_square_vec []
+  | perf_square_step: forall {n: nat} (x: nat) (u: vec n),
+    perf_square_vec u -> perf_square_vec ((INR x * INR x)%R :: u)
+.
+
+Lemma perf_square_non_neg: forall {n} (u: vec n),
+  perf_square_vec u -> is_vec_leq 0 u
+.
+Proof.
+  induction u.
+  - constructor.
+  - intros A. simpl.
+    inv A.
+    constructor.
+    -- apply Rle_0_sqr.
+    -- apply (IHu H1).
+Qed.
+
+Lemma vec_sqrt_nonneg:
+  forall m c (t: vec m), 0%R <= c -> is_vec_leq 0 t -> is_vec_leq 0 (c * sqrtvec t)
+.
+Proof.
+  induction m; intros c t Hc Ht.
+  - rewrite (eta0 t). simpl. constructor.
+  - rewrite (eta t) in *.
+    inv Ht.
+    simpl.
+    constructor.
+    + apply Rmult_le_pos.
+      * exact Hc.
+      * apply sqrt_positivity. assumption.
+    + apply IHm; assumption.
+Qed.
+
+Lemma vec_nonneg_mult_1:
+  forall m c,
+    0%R <= c -> is_vec_leq 0 (c * (1: vec m))
+.
+Proof.
+  induction m; intros c Hc.
+  - simpl. constructor.
+  - simpl. constructor.
+    + lra.
+    + apply IHm. exact Hc.
+Qed.
 
 Close Scope vec_scope.
 Close Scope R_scope.

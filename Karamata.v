@@ -247,7 +247,7 @@ Lemma weak_majorized_raw_shiftin : forall n (x y: R) (u v: Vector.t R n),
 .
 Proof.
   intros n x y u v Hf k.
-  destruct (le_dec k n).
+  destruct (Compare_dec.le_dec k n).
   - specialize (Hf k).
     rewrite 2 (prefix_sum_shiftin_leq _ _ _ _ l) in Hf.
     apply Hf.
@@ -321,7 +321,7 @@ Proof.
   induction n; intros u v Hf k.
   - rewrite 2 (nil_spec (rev _)). destruct k; right; trivial.
   - rewrite (eta u), (eta v). rewrite 2 rev_cons.
-    destruct (le_dec k n).
+    destruct (Compare_dec.le_dec k n).
     + rewrite 2 (prefix_sum_shiftin_leq _ _ _ _ l).
       apply IHn. apply Hf.
     + assert (N: forall a b, (a < b -> exists c, b = c + S a)%nat).
