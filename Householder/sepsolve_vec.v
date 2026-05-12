@@ -378,8 +378,9 @@ Qed.
 Lemma dot_dist: forall {n} (u v z: vec n),
   dot u (v + z) = (dot u v + dot u z)%R.
 Proof.
-  induction u; intuition.
-  rewrite (eta v), (eta z).
+  induction u; intros; auto.
+  + simpl. lra.
+  + rewrite (eta v), (eta z).
   cbn. unfold plusvecs in IHu. rewrite IHu. lra.
 Qed.
 
@@ -395,7 +396,7 @@ Lemma dot_split: forall {n m} (u v: vec n) (x y: vec m),
   dot (u ++ x) (v ++ y) = (dot u v + dot x y)%R.
 Proof.
   induction n.
-    - intros. rewrite (eta0 u), (eta0 v). intuition.
+    - intros. rewrite (eta0 u), (eta0 v). simpl. lra.
     - intros. rewrite (eta u), (eta v).
       cbn. rewrite IHn. lra.
 Qed.
@@ -635,6 +636,82 @@ Proof.
     + lra.
     + apply IHm. exact Hc.
 Qed.
+
+Lemma leq_refl:
+  forall (n: nat) (x: vec n),
+    is_vec_leq x x
+.
+Proof. induction x; constructor; [lra|assumption]. Qed.
+
+Fact leq_0_1:
+  forall (n: nat),
+  @is_vec_leq n 0 1
+.
+Proof.
+  induction n; [constructor|].
+  rewrite (eta 0), (eta 1).
+  constructor.
+  + simpl. lra.
+  + apply IHn.
+Qed.
+
+
+Lemma is_binary_nonneg :
+  forall {n : nat} (a : vec n),
+    is_binary a -> is_vec_leq 0 a.
+Proof.
+  induction n; intros a Hbin.
+  - rewrite nil_spec. constructor.
+  - rewrite (eta a) in *.
+    inv Hbin.
+    rewrite (eta 0).
+    constructor.
+    + simpl. destruct H2; subst; lra.
+    + apply IHn. exact H3.
+Qed.
+
+Lemma binary_perf_square_dot_nat :
+  forall m (u v : vec m),
+    is_binary u -> perf_square_vec v -> exists q, dot u v = INR q.
+Proof.
+  induction m; intros u v Bi Pe.
+  + exists O. rewrite (nil_spec u). trivial.
+  + rewrite (eta u) in Bi. rewrite (eta v) in Pe.
+    inv (Bi, Pe).
+    destruct (IHm _ _ H3 H1).
+    destruct H2.
+    ++ exists (x0)%nat.
+       rewrite dot_step.
+       rewrite H, H2, <- H0. lra.
+    ++ exists (x * x + x0)%nat.
+       rewrite dot_step.
+       rewrite H, H2, <- H0.
+       rewrite <- mult_INR. rewrite plus_INR. lra.
+Qed.
+
+Lemma binary_perf_square_dot_zero_or_ge_1 :
+  forall {m : nat} (u v : vec m),
+    is_binary u -> perf_square_vec v ->
+    dot u v = 0%R \/ 1 <= dot u v.
+Proof.
+  intros m u v Hu Hv.
+  destruct (binary_perf_square_dot_nat m u v Hu Hv) as [q Hq].
+  destruct q.
+  - left. simpl in Hq. lra.
+  - right. rewrite Hq. rewrite S_INR. pose proof (pos_INR q). lra.
+Qed.
+
+Lemma sqvec_hd:
+  forall (n: nat) (a: vec (S n)),
+    hd (sqvec a) = ((hd a) * (hd a))%R
+.
+Proof. intros. rewrite (eta a). trivial. Qed.
+
+Lemma sqvec_tl:
+  forall (n: nat) (a: vec (S n)),
+    tl (sqvec a) = sqvec (tl a)
+.
+Proof. intros. rewrite (eta a). trivial. Qed.
 
 Close Scope vec_scope.
 Close Scope R_scope.
