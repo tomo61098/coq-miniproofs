@@ -51,6 +51,9 @@ Definition is_ec_partition {d : nat} (a s : vec d) : Prop :=
   dot a s = dot s 1 / 2
 .
 
+Definition box_constraints {d : nat} (a : vec d) : Prop :=
+  is_vec_leq 0 a /\ is_vec_leq a 1.
+
 Definition has_ec_partition {d : nat} (s : vec d) : Prop :=
   exists a, is_ec_partition a s.
 
@@ -364,6 +367,67 @@ Fixpoint hinge_form {d : nat}
   | List.nil => 0
   | List.cons g L' => hinge_against c a g L' + hinge_form c a L'
   end.
+
+Fixpoint hinge_cross {d : nat}
+  (c : R) (a : vec d) (L1 L2 : list (@gaussian d)) : R :=
+  match L1 with
+  | List.nil => 0
+  | List.cons g L1' => hinge_against c a g L2 + hinge_cross c a L1' L2
+  end.
+
+Lemma hinge_against_app :
+  forall {d : nat} (c : R) (a : vec d) (g : @gaussian d)
+    (L1 L2 : list (@gaussian d)),
+    hinge_against c a g (List.app L1 L2) =
+      (hinge_against c a g L1 + hinge_against c a g L2)%R.
+Proof.
+  induction L1; intros.
+  - simpl. lra.
+  - simpl. rewrite IHL1. lra.
+Qed.
+
+Lemma hinge_form_app :
+  forall {d : nat} (c : R) (a : vec d)
+    (L1 L2 : list (@gaussian d)),
+    hinge_form c a (List.app L1 L2) =
+      (hinge_form c a L1 + hinge_form c a L2 +
+       hinge_cross c a L1 L2)%R.
+Proof.
+  induction L1; intros.
+  - simpl. lra.
+  - simpl.
+    rewrite hinge_against_app.
+    rewrite IHL1.
+    lra.
+Qed.
+
+Lemma hinge_cross_zero :
+  forall {d : nat} (c : R) (a : vec d)
+    (L1 L2 : list (@gaussian d)),
+    (forall g, List.In g L1 -> hinge_against c a g L2 = 0%R) ->
+    hinge_cross c a L1 L2 = 0%R.
+Proof.
+  induction L1; intros.
+  - simpl. reflexivity.
+  - simpl.
+    rewrite H by (simpl; auto).
+    rewrite IHL1.
+    + lra.
+    + intros. apply H. simpl. auto.
+Qed.
+
+Lemma hinge_form_app_no_cross :
+  forall {d : nat} (c : R) (a : vec d)
+    (L1 L2 : list (@gaussian d)),
+    (forall g, List.In g L1 -> hinge_against c a g L2 = 0%R) ->
+    hinge_form c a (List.app L1 L2) =
+      (hinge_form c a L1 + hinge_form c a L2)%R.
+Proof.
+  intros.
+  rewrite hinge_form_app.
+  rewrite hinge_cross_zero by exact H.
+  lra.
+Qed.
 
 Lemma gaussian_pair_stats_ordered :
   forall {d : nat} (a mu1 sig1 mu2 sig2 : vec d),
@@ -1434,6 +1498,663 @@ Proof.
   reflexivity.
 Qed.
 
+Lemma second_gadget_gamma_ge_1 :
+  forall (n : nat) (m : R),
+    1 <= m -> 1 <= second_gadget_gamma n m.
+Proof.
+  intros n m Hm.
+  unfold second_gadget_gamma.
+  pose proof (gaussian_schedule_separation_sum_nonneg m n n).
+  lra.
+Qed.
+
+Lemma pow_le_mono_nat :
+  forall (m : R) (i j : nat),
+    1 <= m -> (i <= j)%nat -> m ^ i <= m ^ j.
+Proof.
+  intros.
+  apply Rle_pow; lra || lia.
+Qed.
+
+Lemma dot_box_le_dot_1 :
+  forall {n : nat} (a s : vec n),
+    box_constraints a ->
+    is_vec_leq 0 s ->
+    dot a s <= dot s 1%Vec.
+Proof.
+  intros n a s [_ Ha_le_1] Hs.
+  rewrite dot_comm.
+  apply dot_vec_noneg; assumption.
+Qed.
+
+Lemma const_schedule_distance :
+  forall {n : nat} (x y : R) (a : vec n),
+    dot a (sqvec (x * 1 - y * 1)) =
+      ((x - y) * (x - y) * dot a 1%Vec)%R.
+Proof.
+  induction n; intros x y a.
+  - rewrite (eta0 a). simpl. ring.
+  - rewrite dot_step.
+    replace (tl (@sqvec (S n) (x * 1 - y * 1))) with
+      (@sqvec n (x * 1 - y * 1)) by auto.
+    rewrite IHn.
+    rewrite (dot_step a).
+    cbn. lra.
+Qed.
+
+Lemma shifted_schedule_distance_lower :
+  forall {n : nat} (gamma A m q : R) (a s : vec n),
+    0 <= gamma ->
+    0 <= m ->
+    0 <= gamma * A - q ->
+    is_vec_leq 0 a ->
+    is_vec_leq 0 s ->
+    ((gamma * A - q) * (gamma * A - q) * dot a 1%Vec <=
+      dot a (sqvec (gamma * (A * 1 + m * sqrtvec s) - q * 1)%Vec))%R.
+Proof.
+  induction n; intros gamma A m q a s Hgamma Hm Hgap Ha Hs.
+  - rewrite (eta0 a), (eta0 s). simpl. lra.
+  - assert (Ha_hd : 0 <= hd a).
+    { rewrite (eta a) in Ha. inversion Ha; subst; inv_cleanup; assumption. }
+    assert (Ha_tl : is_vec_leq 0 (tl a)).
+    { rewrite (eta a) in Ha. inversion Ha; subst; inv_cleanup; assumption. }
+    assert (Hs_hd : 0 <= hd s).
+    { rewrite (eta s) in Hs. inversion Hs; subst; inv_cleanup; assumption. }
+    assert (Hs_tl : is_vec_leq 0 (tl s)).
+    { rewrite (eta s) in Hs. inversion Hs; subst; inv_cleanup; assumption. }
+    specialize (IHn gamma A m q (tl a) (tl s)
+      Hgamma Hm Hgap Ha_tl Hs_tl).
+    rewrite (eta a), (eta s).
+    rewrite !dot_step.
+    assert (Hsqrt : 0 <= sqrt (hd s)).
+    { apply sqrt_positivity. exact Hs_hd. }
+    replace (hd (sqvec (gamma * (A * 1 + m * sqrtvec (hd s :: tl s)) - q * 1)))%Vec
+      with ((gamma * (A + m * sqrt (hd s)) - q) * (gamma * (A + m * sqrt (hd s)) - q))%R.
+    2:{ simpl. rewrite ! Rmult_1_r. trivial.  }
+    replace (tl (sqvec (gamma * (A * 1 + m * sqrtvec (hd s :: tl s)) - q * 1)))%Vec with
+      ((sqvec (gamma * (A * 1 + m * sqrtvec (tl s)) - q * 1))) by trivial.
+    simpl.
+    rewrite Rmult_plus_distr_l.
+    apply Rplus_le_compat; auto.
+    rewrite (Rmult_comm _ (hd a * 1)%R).
+    rewrite Rmult_1_r.
+    apply Rmult_le_compat_l; auto.
+    replace (gamma * (A + m * sqrt (hd s)) - q)%R with
+      ((gamma * A - q + gamma * m * sqrt (hd s)))%R by lra.
+    rewrite Rmult_plus_distr_l.
+    rewrite Rmult_plus_distr_r.
+    rewrite <- Rplus_0_r at 1.
+    rewrite Rplus_assoc.
+    apply Rplus_le_compat_l.
+    apply Rplus_le_le_0_compat.
+    + repeat (apply Rmult_le_pos; auto).
+    + apply Rmult_le_pos; [|repeat (apply Rmult_le_pos; auto)].
+      apply Rplus_le_le_0_compat; auto.
+      repeat (apply Rmult_le_pos; auto).
+Qed.
+
+Lemma gaussian_schedule_sigma_dot_le_second_gadget_gamma :
+  forall {n : nat} (m : R) (a : vec n) (j : nat),
+    2 <= m ->
+    is_vec_leq 0 a ->
+    dot a 1 = m ->
+    (j <= n)%nat ->
+    dot a (gaussian_schedule_sigma m j) <=
+      (second_gadget_gamma n m * second_gadget_gamma n m * m)%R.
+Proof.
+  intros n m a j Hm Ha Hdot Hj.
+  set (gamma := second_gadget_gamma n m).
+  assert (Hgamma_ge_1 : 1 <= gamma).
+  { unfold gamma. apply second_gadget_gamma_ge_1. lra. }
+  assert (Hsep_n_nonneg : 0 <= gaussian_schedule_separation_sum m n n).
+  { apply gaussian_schedule_separation_sum_nonneg. }
+  destruct j as [|j'].
+  - unfold gaussian_schedule_sigma.
+    rewrite Hdot.
+    rewrite <- (Rmult_1_l) at 1.
+    apply Rmult_le_compat_r; [lra|].
+    rewrite <- (Rmult_1_l 1).
+    nra.
+  - unfold gaussian_schedule_sigma.
+    rewrite gaussian_schedule_sigma_sum_dot.
+    assert (Haxis :
+      dot a (m * canon_e (S j') + 1)%Vec <= m * (m + 1)).
+    { apply dot_schedule_axis_upper; assumption. }
+    assert (Hsep_le :
+      gaussian_schedule_separation_sum m (S j') (S j') <=
+      gaussian_schedule_separation_sum m n n).
+    {
+      destruct (Nat.eq_dec (S j') n) as [Heq | Hneq].
+      - subst. lra.
+      - assert (Hlt : (S j' < n)%nat) by lia.
+        pose proof
+          (gaussian_schedule_separation_sum_scaled_le m (S j') n Hm Hlt)
+          as Hscaled.
+        pose proof
+          (gaussian_schedule_separation_sum_nonneg m (S j') (S j'))
+          as Hsep_j_nonneg.
+        nra.
+    }
+    assert (Hgamma_sq :
+      gaussian_schedule_separation_sum m n n * (m + 1) <= gamma * gamma).
+    {
+      unfold gamma, second_gadget_gamma.
+      nra.
+    }
+    assert (F1: 0 <= dot a (m * canon_e (S j') + 1)).
+    { rewrite dot_dist.
+      apply Rplus_le_le_0_compat.
+      - rewrite dot_mult_dist_r.
+        apply Rmult_le_pos; [lra|apply dot_canon_e_nonneg].
+        auto.
+      - apply non_neg_dot_1.
+        auto.
+    }
+
+    assert (F2: 0 <= gaussian_schedule_separation_sum m (S j') (S j')).
+    { apply gaussian_schedule_separation_sum_nonneg. }
+    assert (F:= Rmult_le_compat _ _ _ _ F2 F1 Hsep_le Haxis).
+    nra.
+Qed.
+
+Lemma gaussian_schedule_sigma_dot_positive_all :
+  forall {n : nat} (m : R) (a : vec n) (j : nat),
+    2 <= m ->
+    is_vec_leq 0 a ->
+    dot a 1 = m ->
+    0 < dot a (gaussian_schedule_sigma m j).
+Proof.
+  intros n m a j Hm Ha Hdot.
+  destruct j as [|j'].
+  - unfold gaussian_schedule_sigma.
+    rewrite Hdot.
+    lra.
+  - apply gaussian_schedule_sigma_dot_positive; try assumption; lia.
+Qed.
+
+Lemma second_gadget_schedule_gap_3c :
+  forall (n j : nat) (m c : R),
+    2 <= m ->
+    1 <= c ->
+    (j <= n)%nat ->
+    second_gadget_gamma n m * (3 * c + m ^ n) - m ^ j >=
+      second_gadget_gamma n m * (3 * c).
+Proof.
+  intros n j m c Hm Hc Hj.
+  assert (Hgamma_ge_1 : 1 <= second_gadget_gamma n m).
+  { apply second_gadget_gamma_ge_1. lra. }
+  assert (Hpow_le : m ^ j <= m ^ n).
+  { apply pow_le_mono_nat; lra || lia. }
+  assert (Hpow_j_nonneg : 0 <= m ^ j).
+  { pose proof (pow_R1_Rle m j ltac:(lra)). lra. }
+  nra.
+Qed.
+
+Lemma second_gadget_schedule_gap_2c :
+  forall (n j : nat) (m c : R),
+    2 <= m ->
+    1 <= c ->
+    (j <= n)%nat ->
+    second_gadget_gamma n m * (2 * c + m ^ n) - m ^ j >=
+      second_gadget_gamma n m * (2 * c).
+Proof.
+  intros n j m c Hm Hc Hj.
+  assert (Hgamma_ge_1 : 1 <= second_gadget_gamma n m).
+  { apply second_gadget_gamma_ge_1. lra. }
+  assert (Hpow_le : m ^ j <= m ^ n).
+  { apply pow_le_mono_nat; lra || lia. }
+  assert (Hpow_j_nonneg : 0 <= m ^ j).
+  { pose proof (pow_R1_Rle m j ltac:(lra)). lra. }
+  nra.
+Qed.
+
+Lemma second_gadget_schedule_gap_c_plus_m :
+  forall (n j : nat) (m c : R),
+    (0 < n)%nat ->
+    2 <= m ->
+    1 <= c ->
+    (j < n)%nat ->
+    second_gadget_gamma n m * (3 * c + m ^ n) - m ^ j >=
+      second_gadget_gamma n m * (c + m).
+Proof.
+  intros n j m c Hn Hm Hc Hj.
+  assert (Hgamma_ge_1 : 1 <= second_gadget_gamma n m).
+  { apply second_gadget_gamma_ge_1. lra. }
+  assert (Hpow_j_nonneg : 0 <= m ^ j).
+  { pose proof (pow_R1_Rle m j ltac:(lra)). lra. }
+  assert (Htail : m - 1 <= m ^ n - m ^ j).
+  {
+    destruct n as [|n']; [lia|].
+    assert (Hj' : (j <= n')%nat) by lia.
+    assert (Hpow_j_le : m ^ j <= m ^ n').
+    { apply pow_le_mono_nat; lra || lia. }
+    assert (Hpow_n'_ge_1 : 1 <= m ^ n').
+    { apply pow_R1_Rle. lra. }
+    simpl.
+    assert (Hstep : m - 1 <= m * m ^ n' - m ^ n').
+    {
+      replace (m * m ^ n' - m ^ n')%R with
+        (m ^ n' * (m - 1))%R by ring.
+      nra.
+    }
+    nra.
+  }
+  assert (Hscaled_tail :
+    second_gadget_gamma n m * (m - 1) <=
+    second_gadget_gamma n m * m ^ n - m ^ j).
+  {
+    assert (second_gadget_gamma n m * (m ^ n - m ^ j) <=
+      second_gadget_gamma n m * m ^ n - m ^ j).
+    {
+      nra.
+    }
+    nra.
+  }
+  nra.
+Qed.
+
+Lemma square_le_of_nonneg_le :
+  forall x y : R,
+    0 <= x -> x <= y -> x * x <= y * y.
+Proof.
+  intros x y Hx Hxy.
+  assert (Hy : 0 <= y) by lra.
+  apply Rmult_le_compat; lra.
+Qed.
+
+Lemma gap_square_ge_gamma_xy :
+  forall gamma x y scale gap : R,
+    0 <= gamma ->
+    0 <= x ->
+    0 <= y ->
+    x <= scale ->
+    y <= scale ->
+    gamma * scale <= gap ->
+    gamma * gamma * x * y <= gap * gap.
+Proof.
+  intros gamma x y scale gap Hgamma Hx Hy Hx_scale Hy_scale Hgap.
+  eapply Rle_trans with
+    (r2 := ((gamma * gamma) * (scale * scale))%R).
+  - replace (gamma * gamma * x * y)%R with
+      ((gamma * gamma) * (x * y))%R by ring.
+    apply Rmult_le_compat_l.
+    + apply Rmult_le_pos; assumption.
+    + apply Rmult_le_compat; lra.
+  - replace ((gamma * gamma) * (scale * scale))%R with
+      ((gamma * scale) * (gamma * scale))%R by ring.
+    apply square_le_of_nonneg_le.
+    + apply Rmult_le_pos; lra.
+    + exact Hgap.
+Qed.
+
+Lemma second_gadget_schedule_pair_hinge_zero_1 :
+  forall {n : nat} (m c : R) (a s : vec n) (j : nat),
+    2 <= m ->
+    1 <= c ->
+    is_vec_leq 0 a ->
+    dot a 1 = m ->
+    (j <= n)%nat ->
+    gaussian_pair_hinge c a
+      (second_gadget_g1 m c) (gaussian_schedule_class m j) = 0%R.
+Proof.
+  intros n m c a s j Hm Hc Ha Hdot Hj.
+  set (gamma := second_gadget_gamma n m).
+  set (A := (3 * c + m ^ n)%R).
+  assert (Hgamma_pos : 0 < gamma).
+  { unfold gamma. apply second_gadget_gamma_pos. lra. }
+  assert (Hgap : gamma * A - m ^ j >= gamma * (3 * c)).
+  { unfold gamma, A. apply second_gadget_schedule_gap_3c; assumption. }
+  unfold gaussian_pair_hinge, gaussian_pair_stats,
+    second_gadget_g1, gaussian_schedule_class.
+  simpl.
+  apply hinge_zero_of_mul_le.
+  - apply Rmax_lt_if_l.
+    rewrite second_gadget_sigma1_dot.
+    rewrite Hdot.
+    fold gamma.
+    apply Rmult_lt_0_compat.
+    + apply Rmult_lt_0_compat; lra.
+    + lra.
+  - apply Rmult_Rmax_le; [lra| |].
+    + rewrite second_gadget_sigma1_dot.
+      unfold second_gadget_mu1, gaussian_schedule_mu.
+      fold gamma A.
+      rewrite const_schedule_distance.
+      rewrite Hdot.
+
+      eapply Rle_trans with (r2 := (gamma * gamma * c * c * m)%R).
+      * replace (gamma * gamma * c * c * m)%R with
+          ((c * c) * (gamma * gamma * m))%R by ring.
+        apply Rmult_le_compat_r.
+        -- apply Rmult_le_pos.
+           ++ apply Rmult_le_pos; lra.
+           ++ lra.
+        -- replace c with (1 * c)%R at 1 by ring.
+           apply Rmult_le_compat_r; lra.
+      * replace (gamma * gamma * c * c * m)%R with
+          ((gamma * gamma * c * c) * m)%R by ring.
+        replace ((gamma * A - m ^ j) * (gamma * A - m ^ j) * m)%R with
+          (((gamma * A - m ^ j) * (gamma * A - m ^ j)) * m)%R by ring.
+        apply Rmult_le_compat_r; [lra |].
+        replace (gamma * gamma * c * c)%R with
+          ((gamma * c) * (gamma * c))%R by ring.
+        assert (Hgc_nonneg : 0 <= gamma * c).
+        { apply Rmult_le_pos; lra. }
+        assert (Hgc_le_3gc : gamma * c <= gamma * (3 * c)).
+        {
+          replace (gamma * (3 * c))%R with
+            (3 * (gamma * c))%R by ring.
+          lra.
+        }
+        assert (Hgc_le_gap : gamma * c <= gamma * A - m ^ j) by lra.
+        assert (Hgap_nonneg : 0 <= gamma * A - m ^ j) by lra.
+        apply Rmult_le_compat; lra.
+    + pose proof
+        (gaussian_schedule_sigma_dot_le_second_gadget_gamma m a j
+          Hm Ha Hdot ltac:(lia))
+        as Hsched.
+      unfold second_gadget_mu1, gaussian_schedule_mu.
+      fold gamma A.
+      rewrite const_schedule_distance.
+      rewrite Hdot.
+      fold gamma in Hsched.
+      eapply Rle_trans with (r2 := (c * (gamma * gamma * m))%R).
+      * apply Rmult_le_compat_l; [lra|exact Hsched].
+      * replace (c * (gamma * gamma * m))%R with
+          ((gamma * gamma * c) * m)%R by ring.
+        replace ((gamma * A - m ^ j) * (gamma * A - m ^ j) * m)%R with
+          (((gamma * A - m ^ j) * (gamma * A - m ^ j)) * m)%R by ring.
+        apply Rmult_le_compat_r; [lra|].
+        eapply Rle_trans with (r2 := (gamma * gamma * c * c)%R).
+        -- replace (gamma * gamma * c)%R with
+             ((gamma * gamma) * c)%R by ring.
+           replace (gamma * gamma * c * c)%R with
+             ((gamma * gamma) * (c * c))%R by ring.
+           apply Rmult_le_compat_l.
+           ++ apply Rmult_le_pos; lra.
+           ++ replace c with (1 * c)%R at 1 by ring.
+              apply Rmult_le_compat_r; lra.
+        -- replace (gamma * gamma * c * c)%R with
+             ((gamma * c) * (gamma * c))%R by ring.
+           assert (Hgc_nonneg : 0 <= gamma * c).
+           { apply Rmult_le_pos; lra. }
+           assert (Hgc_le_3gc : gamma * c <= gamma * (3 * c)).
+           {
+             replace (gamma * (3 * c))%R with
+               (3 * (gamma * c))%R by ring.
+             lra.
+           }
+           assert (Hgc_le_gap : gamma * c <= gamma * A - m ^ j) by lra.
+           assert (Hgap_nonneg : 0 <= gamma * A - m ^ j) by lra.
+           apply Rmult_le_compat; lra.
+Qed.
+
+Lemma second_gadget_schedule_pair_hinge_zero_2 :
+  forall {n : nat} (m c : R) (a s : vec n) (j : nat),
+    (0 < n)%nat ->
+    2 <= m ->
+    1 <= c ->
+    is_vec_leq 0 a ->
+    is_vec_leq 0 s ->
+    dot a 1 = m ->
+    (j < n)%nat ->
+    gaussian_pair_hinge c a
+      (second_gadget_g2 m c s) (gaussian_schedule_class m j) = 0%R.
+Proof.
+  intros n m c a s j Hn Hm Hc Ha Hs Hdot Hj.
+  set (gamma := second_gadget_gamma n m).
+  set (A := (3 * c + m ^ n)%R).
+  assert (Hgamma_pos : 0 < gamma).
+  { unfold gamma. apply second_gadget_gamma_pos. lra. }
+  assert (Hgap : gamma * A - m ^ j >= gamma * (c + m)).
+  { unfold gamma, A. apply second_gadget_schedule_gap_c_plus_m; assumption. }
+  assert (Hgap_nonneg : 0 <= gamma * A - m ^ j).
+  {
+    assert (0 <= gamma * (c + m)).
+    { apply Rmult_le_pos; lra. }
+    lra.
+  }
+  unfold gaussian_pair_hinge, gaussian_pair_stats,
+    second_gadget_g2, gaussian_schedule_class.
+  simpl.
+  apply hinge_zero_of_mul_le.
+  - apply Rmax_lt_if_l.
+    rewrite second_gadget_sigma2_dot.
+    rewrite Hdot.
+    fold gamma.
+    apply Rmult_lt_0_compat; [|lra].
+    apply Rmult_lt_0_compat; [|lra].
+    apply Rmult_lt_0_compat; lra.
+  - apply Rmult_Rmax_le; [lra| |].
+    + rewrite second_gadget_sigma2_dot.
+      rewrite Hdot.
+      unfold second_gadget_mu2, gaussian_schedule_mu.
+      fold gamma A.
+      eapply Rle_trans.
+      2:{
+        apply shifted_schedule_distance_lower; try assumption; lra.
+      }
+      fold gamma.
+      rewrite Hdot.
+      replace (c * (gamma * gamma * m * m))%R with
+        ((gamma * gamma * c * m) * m)%R by ring.
+      replace ((gamma * A - m ^ j) * (gamma * A - m ^ j) * m)%R with
+        (((gamma * A - m ^ j) * (gamma * A - m ^ j)) * m)%R by ring.
+      apply Rmult_le_compat_r; [lra|].
+      apply (gap_square_ge_gamma_xy gamma c m (c + m)); lra.
+    + pose proof
+        (gaussian_schedule_sigma_dot_le_second_gadget_gamma m a j
+          Hm Ha Hdot ltac:(lia))
+        as Hsched.
+      unfold second_gadget_mu2, gaussian_schedule_mu.
+      fold gamma A.
+      eapply Rle_trans.
+      2:{
+        apply shifted_schedule_distance_lower; try assumption; lra.
+      }
+      fold gamma in Hsched.
+      rewrite Hdot.
+      eapply Rle_trans with (r2 := (c * (gamma * gamma * m))%R).
+      * apply Rmult_le_compat_l; [lra|exact Hsched].
+      * replace (c * (gamma * gamma * m))%R with
+          ((gamma * gamma * c) * m)%R by ring.
+        replace ((gamma * A - m ^ j) * (gamma * A - m ^ j) * m)%R with
+          (((gamma * A - m ^ j) * (gamma * A - m ^ j)) * m)%R by ring.
+        apply Rmult_le_compat_r; [lra|].
+        replace (gamma * gamma * c)%R with
+          (gamma * gamma * c * 1)%R by ring.
+        apply (gap_square_ge_gamma_xy gamma c 1 (c + m)); lra.
+Qed.
+
+Lemma second_gadget_schedule_pair_hinge_zero_3 :
+  forall {n : nat} (m c : R) (a s : vec n) (j : nat),
+    2 <= m ->
+    1 <= c ->
+    box_constraints a ->
+    is_vec_leq 0 s ->
+    dot a 1 = m ->
+    dot s 1 = (2 * c)%R ->
+    (j <= n)%nat ->
+    gaussian_pair_hinge c a
+      (second_gadget_g3 m c s) (gaussian_schedule_class m j) = 0%R.
+Proof.
+  intros n m c a s j Hm Hc Hbox Hs Hdot Hstotal Hj.
+  destruct Hbox as [Ha Ha_le_1].
+  set (gamma := second_gadget_gamma n m).
+  set (B := (2 * c + m ^ n)%R).
+  assert (Hgamma_pos : 0 < gamma).
+  { unfold gamma. apply second_gadget_gamma_pos. lra. }
+  assert (Hgap : gamma * B - m ^ j >= gamma * (2 * c)).
+  { unfold gamma, B. apply second_gadget_schedule_gap_2c; assumption. }
+  assert (Has_bound : dot a s <= 2 * c).
+  {
+    rewrite <- Hstotal.
+    apply dot_box_le_dot_1; auto.
+    split; assumption.
+  }
+  unfold gaussian_pair_hinge, gaussian_pair_stats,
+    second_gadget_g3, gaussian_schedule_class.
+  simpl.
+  apply hinge_zero_of_mul_le.
+  - apply Rmax_lt_if_r.
+    apply gaussian_schedule_sigma_dot_positive_all; assumption.
+  - apply Rmult_Rmax_le; [lra| |].
+    + rewrite second_gadget_sigma3_dot.
+      unfold second_gadget_mu3, gaussian_schedule_mu.
+      fold gamma B.
+      rewrite const_schedule_distance.
+      rewrite Hdot.
+      fold gamma.
+      assert (Hdotas_nonneg : 0 <= dot a s).
+      { apply dot_vec_noneg_0; assumption. }
+      replace (c * (gamma * gamma * m * dot a s))%R with
+        ((gamma * gamma * c * dot a s) * m)%R by ring.
+      replace ((gamma * B - m ^ j) * (gamma * B - m ^ j) * m)%R with
+        (((gamma * B - m ^ j) * (gamma * B - m ^ j)) * m)%R by ring.
+      apply Rmult_le_compat_r; [lra|].
+      apply (gap_square_ge_gamma_xy gamma c (dot a s) (2 * c)); lra.
+    + pose proof
+        (gaussian_schedule_sigma_dot_le_second_gadget_gamma m a j Hm Ha Hdot Hj)
+        as Hsched.
+      unfold second_gadget_mu3, gaussian_schedule_mu.
+      fold gamma B.
+      rewrite const_schedule_distance.
+      rewrite Hdot.
+      fold gamma in Hsched.
+      eapply Rle_trans with (r2 := (c * (gamma * gamma * m))%R).
+      * apply Rmult_le_compat_l; [lra|exact Hsched].
+      * replace (c * (gamma * gamma * m))%R with
+          ((gamma * gamma * c) * m)%R by ring.
+        replace ((gamma * B - m ^ j) * (gamma * B - m ^ j) * m)%R with
+          (((gamma * B - m ^ j) * (gamma * B - m ^ j)) * m)%R by ring.
+        apply Rmult_le_compat_r; [lra|].
+        replace (gamma * gamma * c)%R with
+          (gamma * gamma * c * 1)%R by ring.
+        apply (gap_square_ge_gamma_xy gamma c 1 (2 * c)); lra.
+Qed.
+
+Lemma second_gadget_schedule_hinge_against_zero_1 :
+  forall {n : nat} (k : nat) (m c : R) (a s : vec n),
+    2 <= m ->
+    1 <= c ->
+    is_vec_leq 0 a ->
+    dot a 1 = m ->
+    (k <= S n)%nat ->
+    hinge_against c a (second_gadget_g1 m c)
+      (to_list (gaussian_schedule m k)) = 0%R.
+Proof.
+  induction k; intros.
+  - simpl. reflexivity.
+  - rewrite gaussian_schedule_snoc.
+    rewrite hinge_against_snoc.
+    rewrite IHk by (try assumption; lia).
+    rewrite second_gadget_schedule_pair_hinge_zero_1 by (try assumption; lia).
+    lra.
+Qed.
+
+Lemma second_gadget_schedule_hinge_against_zero_2 :
+  forall {n : nat} (k : nat) (m c : R) (a s : vec n),
+    (0 < n)%nat ->
+    2 <= m ->
+    1 <= c ->
+    is_vec_leq 0 a ->
+    is_vec_leq 0 s ->
+    dot a 1 = m ->
+    (k <= n)%nat ->
+    hinge_against c a (second_gadget_g2 m c s)
+      (to_list (gaussian_schedule m k)) = 0%R.
+Proof.
+  induction k; intros.
+  - simpl. reflexivity.
+  - rewrite gaussian_schedule_snoc.
+    rewrite hinge_against_snoc.
+    rewrite IHk by (try assumption; lia).
+    rewrite second_gadget_schedule_pair_hinge_zero_2 by (try assumption; lia).
+    lra.
+Qed.
+
+Lemma second_gadget_schedule_hinge_against_zero_3 :
+  forall {n : nat} (k : nat) (m c : R) (a s : vec n),
+    2 <= m ->
+    1 <= c ->
+    box_constraints a ->
+    is_vec_leq 0 s ->
+    dot a 1 = m ->
+    dot s 1 = (2 * c)%R ->
+    (k <= S n)%nat ->
+    hinge_against c a (second_gadget_g3 m c s)
+      (to_list (gaussian_schedule m k)) = 0%R.
+Proof.
+  induction k; intros.
+  - simpl. reflexivity.
+  - rewrite gaussian_schedule_snoc.
+    rewrite hinge_against_snoc.
+    rewrite IHk by (try assumption; lia).
+    rewrite second_gadget_schedule_pair_hinge_zero_3 by (try assumption; lia).
+    lra.
+Qed.
+
+Theorem second_gadget_schedule_hinge_form_app :
+  forall {n : nat} (m c : R) (a s : vec n),
+    (0 < n)%nat ->
+    2 <= m ->
+    1 <= c ->
+    box_constraints a ->
+    is_vec_leq 0 s ->
+    dot a 1 = m ->
+    dot s 1 = (2 * c)%R ->
+    hinge_form c a
+      (List.app (to_list (second_gadget_instance m c s))
+        (to_list (gaussian_schedule m n))) =
+      (hinge_form c a (to_list (second_gadget_instance m c s)) +
+       hinge_form c a (to_list (gaussian_schedule m n)))%R.
+Proof.
+  intros n m c a s Hn Hm Hc Hbox Hs Hdot Hstotal.
+  apply hinge_form_app_no_cross.
+  intros g Hg.
+  unfold second_gadget_instance in Hg.
+  simpl in Hg.
+  destruct Hg as [Hg | [Hg | [Hg | []]]]; subst.
+  - apply second_gadget_schedule_hinge_against_zero_1;
+      try solve [destruct Hbox; assumption | assumption | lia].
+    auto.
+  - apply second_gadget_schedule_hinge_against_zero_2;
+      try solve [destruct Hbox; assumption | assumption | lia].
+      auto.
+  - apply second_gadget_schedule_hinge_against_zero_3;
+      try solve [assumption | lia].
+    auto.
+Qed.
+
+Corollary second_gadget_partition_schedule_hinge_form_app :
+  forall (d : nat) (a s : vec (2 * d)),
+    (1 < d)%nat ->
+    1 <= dot s 1 / 2 ->
+    box_constraints a ->
+    perf_square_vec s ->
+    dot a 1 = INR d ->
+    hinge_form (dot s 1 / 2) a
+      (List.app
+        (to_list (second_gadget_partition_instance (INR d) s))
+        (to_list (gaussian_schedule (INR d) (2 * d)))) =
+      (hinge_form (dot s 1%Vec / 2) a
+        (to_list (second_gadget_partition_instance (INR d) s)) +
+       hinge_form (dot s 1%Vec / 2) a
+        (to_list (gaussian_schedule (INR d) (2 * d))))%R.
+Proof.
+  intros d a s Hd Hc Hbox Hsquares Hdot.
+  unfold second_gadget_partition_instance, second_gadget_c.
+  apply second_gadget_schedule_hinge_form_app.
+  - lia.
+  - replace 2%R with (INR 2) by (simpl; lra).
+    apply le_INR. lia.
+  - exact Hc.
+  - exact Hbox.
+  - apply perf_square_non_neg. exact Hsquares.
+  - exact Hdot.
+  - lra.
+Qed.
+
 Theorem second_gadget_hinge_form_partition_iff :
   forall (d : nat) (a s : vec (2 * d)),
     (0 < d)%nat ->
@@ -1762,7 +2483,6 @@ Proof.
     rewrite Z12, Z13, Z23 at 1.
     lra.
 Qed.
-
 
 
 
