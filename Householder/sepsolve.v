@@ -1318,6 +1318,29 @@ Proof.
   destruct (Rle_dec 0 (c - D / S)); lra.
 Qed.
 
+Lemma hinge_against_nonneg :
+  forall {d : nat} (c : R) (a : vec d) (g : @gaussian d)
+    (L : list (@gaussian d)),
+    0 <= hinge_against c a g L.
+Proof.
+  induction L as [| h L IHL]; intros.
+  - simpl. lra.
+  - simpl.
+    pose proof (gaussian_pair_hinge_nonneg c a g h) as Hh.
+    lra.
+Qed.
+
+Lemma hinge_form_nonneg :
+  forall {d : nat} (c : R) (a : vec d) (L : list (@gaussian d)),
+    0 <= hinge_form c a L.
+Proof.
+  induction L as [| g L IHL]; intros.
+  - simpl. lra.
+  - simpl.
+    pose proof (hinge_against_nonneg c a g L) as Hg.
+    lra.
+Qed.
+
 Lemma Rmult_Rmax_le :
   forall (c x y D : R),
     0 <= c -> c * x <= D -> c * y <= D -> c * Rmax x y <= D.
@@ -2482,6 +2505,506 @@ Proof.
     simpl.
     rewrite Z12, Z13, Z23 at 1.
     lra.
+Qed.
+
+Definition partition_gadget_schedule (d : nat) (s : vec (2 * d))
+  : list (@gaussian (2 * d)) :=
+  List.app
+    (to_list (second_gadget_partition_instance (INR d) s))
+    (to_list (gaussian_schedule (INR d) (2 * d))).
+
+(* The recursive schedule contributes correction terms for coordinates
+   [1..2*d-1].  The threshold includes the missing coordinate-[0] term so
+   box constraints make the full correction tight exactly at binary points. *)
+Definition partition_schedule_threshold (d : nat)
+  (a s : vec (2 * d)) : R :=
+  let n := (2 * d - 1)%nat in
+  (dot s 1%Vec / 2 * INR n * (INR n + 1) / 2 -
+   (3 * INR d / 2 - / (1 + dot a (canon_e 0))))%R.
+
+Lemma is_binary_le_1 :
+  forall {d : nat} (a : vec d),
+    is_binary a -> is_vec_leq a 1.
+Proof.
+  induction d; intros a Hbin.
+  - rewrite (nil_spec a). constructor.
+  - rewrite (eta a) in *.
+    inv Hbin.
+    rewrite (eta 1).
+    constructor.
+    + simpl. destruct H2; subst; lra.
+    + apply IHd. exact H3.
+Qed.
+
+Lemma is_binary_box_constraints :
+  forall {d : nat} (a : vec d),
+    is_binary a -> box_constraints a.
+Proof.
+  intros d a Hbin.
+  split.
+  - apply is_binary_nonneg. exact Hbin.
+  - apply is_binary_le_1. exact Hbin.
+Qed.
+
+Lemma dot_canon_e_0 :
+  forall {d : nat} (a : vec (S d)),
+    dot a (canon_e 0) = hd a.
+Proof.
+  intros d a.
+  rewrite (dot_step).
+  simpl.
+  rewrite dot_comm.
+  rewrite dot_0.
+  lra.
+Qed.
+
+Lemma dot_canon_e_shift :
+  forall {d : nat} (a : vec (S d)) (i : nat),
+    dot a (canon_e (S i)) = dot (tl a) (canon_e i).
+Proof.
+  intros d a i.
+  rewrite dot_step.
+  simpl. lra.
+Qed.
+
+Lemma gaussian_schedule_hinge_correction_shift :
+  forall {d : nat} (n : nat) (a : vec (S d)),
+    gaussian_schedule_hinge_correction a (S n) =
+      (/ (1 + dot (tl a) (canon_e 0)) +
+       gaussian_schedule_hinge_correction (tl a) n)%R.
+Proof.
+  intros d n a. revert d a.
+  induction n; intros d a.
+  - simpl. rewrite (dot_step a). simpl.
+    rewrite Rmult_0_r. rewrite ! Rplus_0_l. lra.
+  - simpl.
+    simpl in IHn.
+    rewrite IHn.
+    rewrite (dot_step a).
+    simpl. rewrite Rmult_0_r.
+    rewrite Rplus_0_l.
+    lra.
+Qed.
+
+Definition full_schedule_hinge_correction {d : nat} (a : vec d) : R :=
+  match d as d return vec d -> R with
+  | O => fun _ => 0%R
+  | S n =>
+      fun a =>
+        (/ (1 + dot a (canon_e 0)) +
+         gaussian_schedule_hinge_correction a n)%R
+  end a.
+
+Lemma full_schedule_hinge_correction_cons :
+  forall {d : nat} (a : vec (S d)),
+    full_schedule_hinge_correction a =
+      (/ (1 + hd a) + full_schedule_hinge_correction (tl a))%R.
+Proof.
+  destruct d; intros a.
+  - rewrite (nil_spec (tl a)).
+    rewrite (eta a). cbn. rewrite (nil_spec (tl a)). simpl.
+    rewrite Rmult_1_r.
+    rewrite ! Rplus_0_r.
+    trivial.
+  - unfold full_schedule_hinge_correction.
+    rewrite gaussian_schedule_hinge_correction_shift.
+    rewrite dot_step.
+    simpl. rewrite Rmult_1_r.
+    replace (0%R::0) with (0: vec (S d)) by trivial.
+    rewrite (dot_comm _ 0).
+    rewrite (dot_0).
+    rewrite Rplus_0_r.
+    trivial.
+Qed.
+
+Lemma inv_one_plus_le_line :
+  forall x : R,
+    0 <= x <= 1 ->
+    / (1 + x) <= 1 - x / 2.
+Proof.
+  intros x Hx.
+  assert (Hpos : 0 < 1 + x) by lra.
+  apply (Rmult_le_reg_r (1 + x)); [exact Hpos|].
+  replace (/ (1 + x) * (1 + x))%R with 1%R by (field; lra).
+  replace ((1 - x / 2) * (1 + x))%R with
+    (1 + x * (1 - x) / 2)%R by field.
+  nra.
+Qed.
+
+Lemma inv_one_plus_line_eq_binary :
+  (forall x : R,
+    0 <= x <= 1 ->
+    / (1 + x) = 1 - x / 2 ->
+    x = 0 \/ x = 1)%R.
+Proof.
+  intros x Hx Heq.
+  assert (Hpos : 0 < 1 + x) by lra.
+  assert (Hprod : (x * (1 - x) = 0)%R).
+  {
+    assert (Hmul :
+      (1 = (1 - x / 2) * (1 + x))%R).
+    {
+      rewrite <- Heq.
+      field. lra.
+    }
+    nra.
+  }
+  apply Rmult_integral in Hprod.
+  destruct Hprod; lra.
+Qed.
+
+Lemma full_schedule_hinge_correction_le_line :
+  forall {d : nat} (a : vec d),
+    box_constraints a ->
+    full_schedule_hinge_correction a <=
+      INR d - dot a 1 / 2.
+Proof.
+  induction d; intros a [Ha0 Ha1].
+  - rewrite (nil_spec a).
+    simpl. lra.
+  - rewrite full_schedule_hinge_correction_cons.
+    rewrite dot_step.
+    rewrite S_INR.
+    simpl.
+    rewrite (eta a) in Ha0, Ha1.
+    inversion Ha0 as [| ? ? ? ? ? Ha_hd0 Ha_tl0]; subst; clear Ha0.
+    inversion Ha1 as [| ? ? ? ? ? Ha_hd1 Ha_tl1]; subst; clear Ha1.
+    inv_cleanup.
+    pose proof (inv_one_plus_le_line (hd a) ltac:(lra)) as Hhd.
+    pose proof (IHd (tl a) (conj Ha_tl0 Ha_tl1)) as Htl.
+    lra.
+Qed.
+
+Lemma full_schedule_hinge_correction_eq_binary :
+  forall {d : nat} (a : vec d),
+    box_constraints a ->
+    full_schedule_hinge_correction a =
+      (INR d - dot a 1%Vec / 2)%R ->
+    is_binary a.
+Proof.
+  induction d; intros a [Ha0 Ha1] Hcorr.
+  - rewrite nil_spec.
+    constructor.
+  - rewrite full_schedule_hinge_correction_cons in Hcorr.
+    rewrite dot_step in Hcorr.
+    rewrite S_INR in Hcorr.
+    simpl in Hcorr.
+    rewrite (eta a) in Ha0, Ha1.
+    inversion Ha0 as [| ? ? ? ? ? Ha_hd0 Ha_tl0]; subst; clear Ha0.
+    inversion Ha1 as [| ? ? ? ? ? Ha_hd1 Ha_tl1]; subst; clear Ha1.
+    inv_cleanup.
+    pose proof (inv_one_plus_le_line (hd a) ltac:(lra)) as Hhd_le.
+    pose proof
+      (full_schedule_hinge_correction_le_line (tl a)
+        (conj Ha_tl0 Ha_tl1)) as Htl_le.
+    assert (Hhd_eq : (/ (1 + hd a) = 1 - hd a / 2)%R) by lra.
+    assert (Htl_eq :
+      full_schedule_hinge_correction (tl a) =
+        (INR d - dot (tl a) 1%Vec / 2)%R) by lra.
+    rewrite (eta a).
+    constructor.
+    + apply inv_one_plus_line_eq_binary; [lra|exact Hhd_eq].
+    + apply IHd; [split; assumption|exact Htl_eq].
+Qed.
+
+Lemma full_schedule_hinge_correction_binary_line :
+  forall {d : nat} (a : vec d),
+    is_binary a ->
+    full_schedule_hinge_correction a =
+      (INR d - dot a 1%Vec / 2)%R.
+Proof.
+  induction d; intros a Hbin.
+  - rewrite (nil_spec a).
+    simpl. lra.
+  - rewrite full_schedule_hinge_correction_cons.
+    rewrite dot_step.
+    rewrite S_INR.
+    simpl.
+    rewrite (eta a) in Hbin.
+    inv Hbin.
+    inv_cleanup.
+    rewrite IHd by exact H3.
+    destruct H2 as [Ha | Ha]; rewrite Ha; simpl; lra.
+Qed.
+
+Lemma schedule_full_correction_le_line :
+  forall {D : nat} (n : nat) (a : vec D),
+    D = S n ->
+    box_constraints a ->
+    (/ (1 + dot a (canon_e 0)) +
+     gaussian_schedule_hinge_correction a n <=
+      INR D - dot a 1%Vec / 2)%R.
+Proof.
+  intros D n a HD Hbox.
+  subst D.
+  change
+    ((full_schedule_hinge_correction a <=
+      INR (S n) - dot a 1%Vec / 2)%R).
+  apply full_schedule_hinge_correction_le_line.
+  exact Hbox.
+Qed.
+
+Lemma schedule_full_correction_eq_binary :
+  forall {D : nat} (n : nat) (a : vec D),
+    D = S n ->
+    box_constraints a ->
+    (/ (1 + dot a (canon_e 0)) +
+     gaussian_schedule_hinge_correction a n =
+      INR D - dot a 1%Vec / 2)%R ->
+    is_binary a.
+Proof.
+  intros D n a HD Hbox Hcorr.
+  subst D.
+  change
+    (is_binary a).
+  apply full_schedule_hinge_correction_eq_binary.
+  - exact Hbox.
+  - exact Hcorr.
+Qed.
+
+Lemma schedule_full_correction_binary_line :
+  forall {D : nat} (n : nat) (a : vec D),
+    D = S n ->
+    is_binary a ->
+    (/ (1 + dot a (canon_e 0)) +
+     gaussian_schedule_hinge_correction a n =
+      INR D - dot a 1%Vec / 2)%R.
+Proof.
+  intros D n a HD Hbin.
+  subst D.
+  change
+    ((full_schedule_hinge_correction a =
+      INR (S n) - dot a 1%Vec / 2)%R).
+  apply full_schedule_hinge_correction_binary_line.
+  exact Hbin.
+Qed.
+
+Theorem partition_gadget_schedule_partition_iff :
+  forall (d : nat) (a s : vec (2 * d)),
+    (1 < d)%nat ->
+    1 <= dot s 1 / 2 ->
+    perf_square_vec s ->
+    (box_constraints a /\
+     dot a 1 = INR d /\
+      hinge_form (dot s 1 / 2) a
+        (partition_gadget_schedule d s) <=
+      partition_schedule_threshold d a s) <->
+    is_ec_partition a s.
+Proof.
+  intros d a s Hd Hc Hsquares.
+  assert (Hm_ge_2 : 2 <= INR d).
+  {
+    replace 2%R with (INR 2) by (simpl; lra).
+    apply le_INR. lia.
+  }
+  split.
+  - intros [Hbox [Hcard Hhinge]].
+    assert (Hnonneg : is_vec_leq 0 a) by (destruct Hbox; assumption).
+    assert (Happ :
+      hinge_form (dot s 1 / 2) a
+        (partition_gadget_schedule d s) =
+      (hinge_form (dot s 1%Vec / 2) a
+        (to_list (second_gadget_partition_instance (INR d) s)) +
+       hinge_form (dot s 1%Vec / 2) a
+        (to_list (gaussian_schedule (INR d) (2 * d))))%R).
+    {
+      unfold partition_gadget_schedule.
+      apply second_gadget_partition_schedule_hinge_form_app;
+        assumption.
+    }
+    assert (Hschedule :
+      hinge_form (dot s 1 / 2) a
+        (to_list (gaussian_schedule (INR d) (2 * d))) =
+      (dot s 1%Vec / 2 *
+        INR (2 * d - 1) * (INR (2 * d - 1) + 1) / 2 -
+       gaussian_schedule_hinge_correction a (2 * d - 1))%R).
+    {
+      assert (Hlen :
+        to_list (@gaussian_schedule (2 * d)%nat (INR d) (2 * d)) =
+        to_list (@gaussian_schedule (2 * d)%nat (INR d) (S (2 * d - 1)))).
+      {
+        assert (Hn : (2 * d)%nat = S (2 * d - 1)) by lia.
+        now destruct Hn.
+      }
+      rewrite Hlen.
+      rewrite gaussian_schedule_hinge_form_prefix_m_ge_2;
+        try assumption.
+      reflexivity.
+    }
+    set (G :=
+      hinge_form (dot s 1 / 2) a
+        (to_list (second_gadget_partition_instance (INR d) s))) in *.
+    set (C :=
+      (dot s 1%Vec / 2 *
+        INR (2 * d - 1) * (INR (2 * d - 1) + 1) / 2)%R) in *.
+    set (Corr := gaussian_schedule_hinge_correction a (2 * d - 1)) in *.
+    set (K :=
+      (3 * INR d / 2 - / (1 + dot a (canon_e 0)))%R) in *.
+    rewrite Happ in Hhinge.
+    rewrite Hschedule in Hhinge.
+    unfold partition_schedule_threshold in Hhinge.
+    change (G + (C - Corr) <= C - K)%R in Hhinge.
+    assert (Hgadget_nonneg : 0 <= G).
+    { unfold G. apply hinge_form_nonneg. }
+    assert (Hfull_le :
+      (/ (1 + dot a (canon_e 0)) +
+       gaussian_schedule_hinge_correction a (2 * d - 1) <=
+       3 * INR d / 2)%R).
+    {
+      pose proof
+        (@schedule_full_correction_le_line
+          (2 * d)%nat (2 * d - 1)%nat a ltac:(lia) Hbox) as Hle.
+      rewrite Hcard in Hle.
+      replace (INR (2 * d) - INR d / 2)%R with
+        (3 * INR d / 2)%R in Hle.
+      - exact Hle.
+      - rewrite mult_INR. simpl. lra.
+    }
+    assert (HCorr_le_K : Corr <= K) by (unfold Corr, K; lra).
+    assert (Hgadget_zero : G = 0%R).
+    {
+      assert (HG_le_0 : G <= 0).
+      {
+        apply (Rplus_le_reg_r (C - Corr)).
+        eapply Rle_trans.
+        - exact Hhinge.
+        - rewrite Rplus_0_l.
+          unfold Rminus.
+          apply Rplus_le_compat_l.
+          apply Ropp_le_contravar.
+          exact HCorr_le_K.
+      }
+      apply Rle_antisym.
+      - exact HG_le_0.
+      - exact Hgadget_nonneg.
+    }
+    assert (Hfull_eq :
+      (/ (1 + dot a (canon_e 0)) +
+       gaussian_schedule_hinge_correction a (2 * d - 1) =
+       INR (2 * d) - dot a 1%Vec / 2)%R).
+    {
+      assert (HK_le_Corr : K <= Corr).
+      {
+        rewrite Hgadget_zero in Hhinge.
+        lra.
+      }
+      assert (HCorr_eq_K : Corr = K) by lra.
+      unfold Corr, K in HCorr_eq_K.
+      rewrite Hcard.
+      replace (INR (2 * d) - INR d / 2)%R with
+        (3 * INR d / 2)%R.
+      - lra.
+      - rewrite mult_INR. simpl. lra.
+    }
+    assert (Hbin : is_binary a).
+    {
+      apply
+        (@schedule_full_correction_eq_binary
+          (2 * d)%nat (2 * d - 1)%nat a ltac:(lia) Hbox).
+      exact Hfull_eq.
+    }
+    pose proof
+      (proj1
+        (second_gadget_hinge_form_partition_iff d a s
+          ltac:(lia) Hsquares Hbin Hcard)
+        Hgadget_zero) as Hsum.
+    unfold is_ec_partition.
+    split; [exact Hbin|].
+    split.
+    + rewrite Hcard.
+      rewrite mult_INR.
+      simpl. lra.
+    + exact Hsum.
+  - intro Hpart.
+    destruct Hpart as [Hbin_part [Hcard_half Hsum]].
+    assert (Hbox : box_constraints a).
+    { apply is_binary_box_constraints. exact Hbin_part. }
+    assert (Hnonneg : is_vec_leq 0 a) by (destruct Hbox; assumption).
+    assert (Hcard : dot a 1 = INR d).
+    {
+      rewrite Hcard_half.
+      rewrite mult_INR.
+      simpl. lra.
+    }
+    split; [exact Hbox|].
+    split; [exact Hcard|].
+    assert (Hgadget_zero :
+      hinge_form (dot s 1 / 2) a
+        (to_list (second_gadget_partition_instance (INR d) s)) = 0%R).
+    {
+      apply
+        (proj2
+          (second_gadget_hinge_form_partition_iff d a s
+            ltac:(lia) Hsquares Hbin_part Hcard)).
+      exact Hsum.
+    }
+    assert (Happ :
+      hinge_form (dot s 1 / 2) a
+        (partition_gadget_schedule d s) =
+      (hinge_form (dot s 1%Vec / 2) a
+        (to_list (second_gadget_partition_instance (INR d) s)) +
+       hinge_form (dot s 1%Vec / 2) a
+        (to_list (gaussian_schedule (INR d) (2 * d))))%R).
+    {
+      unfold partition_gadget_schedule.
+      apply second_gadget_partition_schedule_hinge_form_app;
+        assumption.
+    }
+    assert (Hschedule :
+      hinge_form (dot s 1 / 2) a
+        (to_list (gaussian_schedule (INR d) (2 * d))) =
+      (dot s 1%Vec / 2 *
+        INR (2 * d - 1) * (INR (2 * d - 1) + 1) / 2 -
+       gaussian_schedule_hinge_correction a (2 * d - 1))%R).
+    {
+      assert (Hlen :
+        to_list (@gaussian_schedule (2 * d)%nat (INR d) (2 * d)) =
+        to_list (@gaussian_schedule (2 * d)%nat (INR d) (S (2 * d - 1)))).
+      {
+        assert (Hn : (2 * d)%nat = S (2 * d - 1)) by lia.
+        now destruct Hn.
+      }
+      rewrite Hlen.
+      rewrite gaussian_schedule_hinge_form_prefix_m_ge_2;
+        try assumption.
+      reflexivity.
+    }
+    assert (Hfull_eq :
+      (/ (1 + dot a (canon_e 0)) +
+       gaussian_schedule_hinge_correction a (2 * d - 1) =
+       INR (2 * d) - dot a 1%Vec / 2)%R).
+    {
+      apply
+        (@schedule_full_correction_binary_line
+          (2 * d)%nat (2 * d - 1)%nat a ltac:(lia)).
+      exact Hbin_part.
+    }
+    set (G :=
+      hinge_form (dot s 1 / 2) a
+        (to_list (second_gadget_partition_instance (INR d) s))) in *.
+    set (C :=
+      (dot s 1%Vec / 2 *
+        INR (2 * d - 1) * (INR (2 * d - 1) + 1) / 2)%R) in *.
+    set (Corr := gaussian_schedule_hinge_correction a (2 * d - 1)) in *.
+    set (K :=
+      (3 * INR d / 2 - / (1 + dot a (canon_e 0)))%R) in *.
+    rewrite Happ.
+    rewrite Hschedule.
+    rewrite Hgadget_zero.
+    unfold partition_schedule_threshold.
+    change (0 + (C - Corr) <= C - K)%R.
+    assert (HCorr_eq_K : Corr = K).
+    {
+      unfold K.
+      rewrite Hcard in Hfull_eq.
+      replace (INR (2 * d) - INR d / 2)%R with
+        (3 * INR d / 2)%R in Hfull_eq.
+      - lra.
+      - rewrite mult_INR. simpl. lra.
+    }
+    rewrite HCorr_eq_K.
+    rewrite Rplus_0_l.
+    reflexivity.
 Qed.
 
 
